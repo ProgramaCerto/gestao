@@ -29,7 +29,9 @@ import {
   AlignCenter,
   AlignRight,
   AlignJustify,
-  Type
+  Type,
+  Plus,
+  Minus
 } from "lucide-react";
 import { supabase, isSupabaseConfigured } from "../lib/supabase";
 import { LOGO_PROGRAMA_CERTO_BASE64 } from "../lib/logoBase64";
@@ -47,12 +49,12 @@ export interface DocumentItem {
   id_usuario?: string;
   pasta_id: string | null; // null = sem pasta / fora de pasta
   titulo: string;
-  tamanho_titulo?: "pequeno" | "medio" | "grande";
+  tamanho_titulo?: string | number;
   estilo_titulo?: "negrito" | "normal";
   alinhamento_titulo?: "center" | "left" | "right";
   conteudo: string;
-  tamanho_conteudo?: "pequeno" | "medio" | "grande";
-  alinhamento_conteudo?: "justify" | "left" | "center";
+  tamanho_conteudo?: string | number;
+  alinhamento_conteudo?: "justify" | "left" | "center" | "right";
   estilo_conteudo?: string; // Palavras em negrito separadas por vírgula ou 'tudo'
   incluir_assinatura_programa_certo: boolean;
   incluir_assinatura_cordenacao: boolean;
@@ -60,6 +62,16 @@ export interface DocumentItem {
   status: "rascunho" | "emitido" | "arquivado";
   criado_em: string;
   atualizado_em: string;
+}
+
+export function parseFontSize(val: any, defaultVal: number): number {
+  if (typeof val === "number" && !isNaN(val) && val > 0) return val;
+  if (!val) return defaultVal;
+  const num = parseInt(String(val), 10);
+  if (!isNaN(num) && num > 0) return num;
+  if (val === "pequeno") return Math.max(8, defaultVal - 4);
+  if (val === "grande") return defaultVal + 6;
+  return defaultVal;
 }
 
 function escapeHtml(text: string): string {
@@ -145,6 +157,236 @@ export function RenderFormattedContent({
   );
 }
 
+/**
+ * Componente que renderiza a visualização do documento em formato de impressão.
+ * Escala responsivamente para que a folha fique 100% visível em qualquer tamanho de tela
+ * (computador ou celular) sem cortar pela metade, mantendo cabeçalho, conteúdo e assinaturas
+ * lado a lado idêntico à impressão do PDF.
+ */
+export function SulfiteDocumentSheet({
+  titulo,
+  tamanhoTitulo,
+  estiloTitulo,
+  alinhamentoTitulo,
+  conteudo,
+  tamanhoConteudo,
+  alinhamentoConteudo,
+  estiloConteudo,
+  incluirAssinaturaProgramaCerto,
+  incluirAssinaturaCordenacao,
+  incluirCampoAssinaturaAluno,
+  dataCriacao,
+}: {
+  titulo: string;
+  tamanhoTitulo: string | number;
+  estiloTitulo?: "negrito" | "normal";
+  alinhamentoTitulo?: "center" | "left" | "right";
+  conteudo: string;
+  tamanhoConteudo: string | number;
+  alinhamentoConteudo?: "justify" | "left" | "center" | "right";
+  estiloConteudo?: string;
+  incluirAssinaturaProgramaCerto?: boolean;
+  incluirAssinaturaCordenacao?: boolean;
+  incluirCampoAssinaturaAluno?: boolean;
+  dataCriacao?: string;
+}) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const sheetRef = useRef<HTMLDivElement>(null);
+  const [scale, setScale] = useState<number>(1);
+  const [sheetHeight, setSheetHeight] = useState<number>(1123);
+
+  const titleSize = parseFontSize(tamanhoTitulo, 18);
+  const contentSize = parseFontSize(tamanhoConteudo, 16);
+
+  const dataAtual = dataCriacao
+    ? new Date(dataCriacao).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" })
+    : new Date().toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" });
+  const horaAtual = new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+
+  const getAlignClass = (align?: string) => {
+    if (align === "left") return "text-left";
+    if (align === "center") return "text-center";
+    if (align === "right") return "text-right";
+    return "text-justify";
+  };
+
+  useEffect(() => {
+    const updateSize = () => {
+      if (sheetRef.current) {
+        setSheetHeight(Math.max(1123, sheetRef.current.offsetHeight));
+      }
+      if (containerRef.current) {
+        const availableW = containerRef.current.clientWidth;
+        // Largura base de 794px (A4 padrão a 96 DPI).
+        // Se a tela for menor (ex: celular ou preview dividido), escala suavemente para caber inteira
+        // sem ficar cortada na metade e sem barras de rolagem horizontais forçadas.
+        const targetScale = Math.min(1, Math.max(0.15, (availableW - 16) / 794));
+        setScale(targetScale);
+      }
+    };
+
+    updateSize();
+
+    let ro: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== "undefined" && containerRef.current) {
+      ro = new ResizeObserver(updateSize);
+      ro.observe(containerRef.current);
+      if (sheetRef.current) ro.observe(sheetRef.current);
+    }
+
+    window.addEventListener("resize", updateSize);
+    return () => {
+      if (ro) ro.disconnect();
+      window.removeEventListener("resize", updateSize);
+    };
+  }, [titulo, conteudo, tamanhoTitulo, tamanhoConteudo, estiloTitulo, estiloConteudo, incluirAssinaturaProgramaCerto, incluirAssinaturaCordenacao, incluirCampoAssinaturaAluno]);
+
+  return (
+    <div
+      ref={containerRef}
+      className="w-full py-4 px-1 sm:px-4 bg-zinc-200/80 rounded-2xl flex justify-center items-start shadow-inner overflow-hidden select-text"
+    >
+      {/* Wrapper proporcional com as dimensões escaladas exatas para que a página ocupe o espaço correto */}
+      <div
+        style={{
+          width: `${Math.round(794 * scale)}px`,
+          height: `${Math.round(sheetHeight * scale)}px`,
+          position: "relative",
+        }}
+        className="shrink-0 transition-all duration-150"
+      >
+        {/* Folha do documento (794px fixos com scale pura para manter proporções idênticas ao PDF em qualquer tela) */}
+        <div
+          ref={sheetRef}
+          className="bg-white text-zinc-900 shadow-2xl rounded-xs border border-zinc-300 p-8 sm:p-14 flex flex-col justify-between"
+          style={{
+            width: "794px",
+            minHeight: "1123px",
+            transform: `scale(${scale})`,
+            transformOrigin: "top left",
+            position: "absolute",
+            top: 0,
+            left: 0,
+          }}
+        >
+          {/* PARTE SUPERIOR DA FOLHA */}
+          <div className="flex-1 flex flex-col">
+            {/* 1. CABEÇALHO OFICIAL COM LOGO PROGRAMA CERTO */}
+            <div className="flex items-center gap-3.5 border-b border-zinc-200 pb-4 mb-8">
+              <img
+                src={LOGO_PROGRAMA_CERTO_BASE64}
+                alt="Logo Programa Certo"
+                className="w-12 h-12 rounded-xl object-cover shadow-2xs border border-zinc-200/80 shrink-0"
+              />
+              <div className="flex flex-col justify-center">
+                <h1 className="text-xl font-black text-zinc-900 leading-none">
+                  Programa <span className="text-[#0b439c]">Certo</span>
+                </h1>
+                <span className="text-[10px] font-extrabold uppercase tracking-wider text-zinc-400 mt-1">
+                  Plataforma Educacional
+                </span>
+              </div>
+            </div>
+
+            {/* 2. TÍTULO DO DOCUMENTO */}
+            <h2
+              style={{
+                fontSize: `${titleSize}px`,
+                lineHeight: 1.3,
+              }}
+              className={`uppercase tracking-wide text-zinc-900 mb-8 ${
+                estiloTitulo === "normal" ? "font-semibold" : "font-black"
+              } ${getAlignClass(alinhamentoTitulo)}`}
+            >
+              {titulo.trim() || "(TÍTULO DO DOCUMENTO)"}
+            </h2>
+
+            {/* 3. CONTEÚDO DO DOCUMENTO FORMATADO */}
+            <div
+              style={{
+                fontSize: `${contentSize}px`,
+                lineHeight: 1.8,
+              }}
+              className={`text-zinc-800 whitespace-pre-wrap ${getAlignClass(alinhamentoConteudo)}`}
+            >
+              <RenderFormattedContent
+                content={
+                  conteudo.trim() ||
+                  "Nenhum conteúdo inserido ainda. O texto digitado aparecerá exatamente nesta folha oficial..."
+                }
+                estiloConteudo={estiloConteudo}
+              />
+            </div>
+          </div>
+
+          {/* PARTE INFERIOR DA FOLHA (SEMPRE NO FINAL DA FOLHA) */}
+          <div className="mt-auto pt-6">
+            {/* 4. HOMOLOGAÇÃO E ASSINATURAS INSTITUCIONAIS: SEMPRE UMA DO LADO DA OUTRA COMO NO PDF */}
+            {(incluirAssinaturaProgramaCerto || incluirAssinaturaCordenacao || incluirCampoAssinaturaAluno) && (
+              <div className="border border-zinc-300 rounded-xl p-5 bg-white mb-8">
+                <div className="text-[9px] font-black uppercase tracking-wider text-zinc-400 mb-6">
+                  HOMOLOGAÇÃO E ASSINATURAS INSTITUCIONAIS
+                </div>
+
+                <div className="flex items-end justify-between gap-6 w-full">
+                  {/* Assinatura Programa Certo */}
+                  {incluirAssinaturaProgramaCerto && (
+                    <div className="flex-1 min-w-0 text-center flex flex-col items-center">
+                      <div className="flex items-center justify-center gap-1.5 mb-2">
+                        <img
+                          src={LOGO_PROGRAMA_CERTO_BASE64}
+                          alt="Logo"
+                          className="w-5 h-5 rounded object-cover shrink-0"
+                        />
+                        <span className="text-xs font-black text-zinc-900 truncate">
+                          Programa <span className="text-[#0b439c]">Certo</span>
+                        </span>
+                      </div>
+                      <div className="w-full border-t border-zinc-800 mb-1.5" />
+                      <div className="text-xs font-extrabold text-zinc-900 truncate w-full">Gestor Responsável</div>
+                      <div className="text-[10px] text-zinc-500 truncate w-full">Administração Programa Certo</div>
+                    </div>
+                  )}
+
+                  {/* Assinatura Coordenação */}
+                  {incluirAssinaturaCordenacao && (
+                    <div className="flex-1 min-w-0 text-center flex flex-col items-center">
+                      <div className="h-7" />
+                      <div className="w-full border-t border-zinc-800 mb-1.5" />
+                      <div className="text-xs font-extrabold text-zinc-900 truncate w-full">Data: ____ / ____ / ________</div>
+                      <div className="text-[10px] text-zinc-500 truncate w-full">Visto da Coordenação</div>
+                    </div>
+                  )}
+
+                  {/* Assinatura Aluno */}
+                  {incluirCampoAssinaturaAluno && (
+                    <div className="flex-1 min-w-0 text-center flex flex-col items-center">
+                      <div className="h-7" />
+                      <div className="w-full border-t border-zinc-800 mb-1.5" />
+                      <div className="text-xs font-extrabold text-zinc-900 truncate w-full">Assinatura do Aluno</div>
+                      <div className="text-[10px] text-zinc-500 truncate w-full">Estudante / Responsável Legal</div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* 5. RODAPÉ OFICIAL DA FOLHA */}
+            <div className="border-t border-zinc-200 pt-3 flex items-center justify-between text-[10px] text-zinc-400 font-medium">
+              <div>
+                <strong className="text-zinc-600 font-bold">Programa Certo</strong> — Plataforma Educacional
+              </div>
+              <div>
+                Emitido em: {dataAtual} às {horaAtual}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function DocumentTitleEditor({
   docTitulo,
   setDocTitulo,
@@ -157,13 +399,15 @@ function DocumentTitleEditor({
 }: {
   docTitulo: string;
   setDocTitulo: (val: string) => void;
-  docTamanhoTitulo: "pequeno" | "medio" | "grande";
-  setDocTamanhoTitulo: (val: "pequeno" | "medio" | "grande") => void;
+  docTamanhoTitulo: number | string;
+  setDocTamanhoTitulo: React.Dispatch<React.SetStateAction<number>>;
   docEstiloTitulo: "negrito" | "normal";
-  setDocEstiloTitulo: (val: "negrito" | "normal") => void;
+  setDocEstiloTitulo: React.Dispatch<React.SetStateAction<"negrito" | "normal">>;
   docAlinhamentoTitulo: "center" | "left" | "right";
   setDocAlinhamentoTitulo: (val: "center" | "left" | "right") => void;
 }) {
+  const currentSize = parseFontSize(docTamanhoTitulo, 18);
+
   return (
     <div className="space-y-2">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
@@ -171,50 +415,52 @@ function DocumentTitleEditor({
           Título do Documento:
         </label>
 
-        {/* Barra de Ferramentas do Título */}
-        <div className="flex items-center gap-2 flex-wrap bg-zinc-100/90 p-1.5 rounded-xl border border-zinc-200 text-xs">
-          {/* Seletor de Tamanho */}
-          <span className="text-[10px] font-bold text-zinc-500 uppercase px-1">Tamanho:</span>
-          <div className="inline-flex rounded-lg bg-white p-0.5 border border-zinc-200 shadow-2xs">
-            {(["pequeno", "medio", "grande"] as const).map((sz) => (
-              <button
-                key={sz}
-                type="button"
-                onClick={() => setDocTamanhoTitulo(sz)}
-                className={`px-2 py-1 rounded-md text-[11px] font-bold capitalize transition-all cursor-pointer ${
-                  docTamanhoTitulo === sz
-                    ? "bg-[#0b439c] text-white shadow-xs"
-                    : "text-zinc-600 hover:text-zinc-900 hover:bg-zinc-50"
-                }`}
-              >
-                {sz === "medio" ? "Médio" : sz === "pequeno" ? "Pequeno" : "Grande"}
-              </button>
-            ))}
+        {/* Barra de Ferramentas do Título: 1. Tamanho [-] [num] [+], 2. [B], 3. Alinhamento no final */}
+        <div className="flex items-center gap-1.5 flex-wrap bg-zinc-100/90 p-1.5 rounded-xl border border-zinc-200 text-xs">
+          {/* 1. Tamanho da Fonte com botões [-] e [+] */}
+          <div className="inline-flex items-center bg-white rounded-lg border border-zinc-200 shadow-2xs p-0.5">
+            <button
+              type="button"
+              onClick={() => setDocTamanhoTitulo(Math.max(10, currentSize - 1))}
+              title="Diminuir tamanho da letra do título"
+              className="w-7 h-7 flex items-center justify-center rounded text-zinc-700 hover:bg-zinc-100 hover:text-zinc-900 font-black cursor-pointer transition-colors"
+            >
+              <Minus className="w-3.5 h-3.5" />
+            </button>
+            <span className="px-2 font-mono font-black text-xs text-zinc-900 min-w-8 text-center select-none">
+              {currentSize}
+            </span>
+            <button
+              type="button"
+              onClick={() => setDocTamanhoTitulo(Math.min(40, currentSize + 1))}
+              title="Aumentar tamanho da letra do título"
+              className="w-7 h-7 flex items-center justify-center rounded text-zinc-700 hover:bg-zinc-100 hover:text-zinc-900 font-black cursor-pointer transition-colors"
+            >
+              <Plus className="w-3.5 h-3.5" />
+            </button>
           </div>
 
-          {/* Alternador Negrito / Letra grossinha */}
+          {/* 2. Negrito (B) "bzinho ali do lado" */}
           <button
             type="button"
             onClick={() => setDocEstiloTitulo(docEstiloTitulo === "negrito" ? "normal" : "negrito")}
-            title="Alternar título em negrito (letra grossinha) ou normal (letra fina)"
-            className={`px-2.5 py-1 rounded-lg font-black text-xs flex items-center gap-1 border transition-all cursor-pointer ${
+            title="Alternar Negrito (B) do Título"
+            className={`w-7 h-7 flex items-center justify-center rounded-lg border transition-all cursor-pointer font-black text-xs ${
               docEstiloTitulo === "negrito"
                 ? "bg-zinc-900 text-white border-zinc-900 shadow-xs"
-                : "bg-white text-zinc-600 border-zinc-200 hover:bg-zinc-50"
+                : "bg-white text-zinc-700 border-zinc-200 hover:bg-zinc-100"
             }`}
           >
             <Bold className="w-3.5 h-3.5 stroke-[3]" />
-            <span>{docEstiloTitulo === "negrito" ? "Grossinha (Negrito)" : "Fina (Normal)"}</span>
           </button>
 
-          {/* Alinhamento do Título */}
-          <span className="text-[10px] font-bold text-zinc-500 uppercase px-1">Alinhar:</span>
-          <div className="inline-flex rounded-lg bg-white p-0.5 border border-zinc-200 shadow-2xs">
+          {/* 3. Alinhamento no final */}
+          <div className="inline-flex items-center rounded-lg bg-white p-0.5 border border-zinc-200 shadow-2xs">
             <button
               type="button"
               onClick={() => setDocAlinhamentoTitulo("left")}
               title="Alinhar à esquerda"
-              className={`p-1 rounded-md transition-all cursor-pointer ${
+              className={`p-1.5 rounded-md transition-all cursor-pointer ${
                 docAlinhamentoTitulo === "left" ? "bg-[#0b439c] text-white" : "text-zinc-600 hover:bg-zinc-50"
               }`}
             >
@@ -224,7 +470,7 @@ function DocumentTitleEditor({
               type="button"
               onClick={() => setDocAlinhamentoTitulo("center")}
               title="Centralizado no meio"
-              className={`p-1 rounded-md transition-all cursor-pointer ${
+              className={`p-1.5 rounded-md transition-all cursor-pointer ${
                 docAlinhamentoTitulo === "center" ? "bg-[#0b439c] text-white" : "text-zinc-600 hover:bg-zinc-50"
               }`}
             >
@@ -234,7 +480,7 @@ function DocumentTitleEditor({
               type="button"
               onClick={() => setDocAlinhamentoTitulo("right")}
               title="Alinhar à direita"
-              className={`p-1 rounded-md transition-all cursor-pointer ${
+              className={`p-1.5 rounded-md transition-all cursor-pointer ${
                 docAlinhamentoTitulo === "right" ? "bg-[#0b439c] text-white" : "text-zinc-600 hover:bg-zinc-50"
               }`}
             >
@@ -249,12 +495,11 @@ function DocumentTitleEditor({
         value={docTitulo}
         onChange={(e) => setDocTitulo(e.target.value)}
         placeholder="Ex: DECLARAÇÃO DE CONCLUSÃO DE CURSO"
-        className={`w-full px-4 py-2.5 rounded-xl border border-zinc-300 text-zinc-900 focus:outline-none focus:border-[#0b439c] transition-all bg-white ${
-          docEstiloTitulo === "negrito" ? "font-black" : "font-normal"
-        } ${
-          docTamanhoTitulo === "pequeno" ? "text-sm" : docTamanhoTitulo === "grande" ? "text-xl" : "text-base"
-        } ${
-          docAlinhamentoTitulo === "left" ? "text-left" : docAlinhamentoTitulo === "right" ? "text-right" : "text-center"
+        style={{
+          textAlign: docAlinhamentoTitulo,
+        }}
+        className={`w-full px-4 py-2.5 rounded-xl border border-zinc-300 text-zinc-900 focus:outline-none focus:border-[#0b439c] transition-all bg-white uppercase text-base ${
+          docEstiloTitulo === "negrito" ? "font-black" : "font-semibold"
         }`}
         required
       />
@@ -270,33 +515,37 @@ function DocumentContentEditor({
   docAlinhamentoConteudo,
   setDocAlinhamentoConteudo,
   docEstiloConteudo,
-  setDocEstiloConteudo,
   docTitulo,
   docTamanhoTitulo,
   docEstiloTitulo,
   docAlinhamentoTitulo,
+  incluirAssinaturaProgramaCerto,
+  incluirAssinaturaCordenacao,
+  incluirCampoAssinaturaAluno,
   textareaRef,
-  onToggleBoldSelection,
-  onRemoveBoldWord,
-  onToggleAllBold,
+  onToggleBold,
 }: {
   docConteudo: string;
   setDocConteudo: (val: string) => void;
-  docTamanhoConteudo: "pequeno" | "medio" | "grande";
-  setDocTamanhoConteudo: (val: "pequeno" | "medio" | "grande") => void;
-  docAlinhamentoConteudo: "justify" | "left" | "center";
-  setDocAlinhamentoConteudo: (val: "justify" | "left" | "center") => void;
+  docTamanhoConteudo: number | string;
+  setDocTamanhoConteudo: React.Dispatch<React.SetStateAction<number>>;
+  docAlinhamentoConteudo: "justify" | "left" | "center" | "right";
+  setDocAlinhamentoConteudo: (val: "justify" | "left" | "center" | "right") => void;
   docEstiloConteudo: string;
-  setDocEstiloConteudo: (val: string) => void;
   docTitulo: string;
-  docTamanhoTitulo: "pequeno" | "medio" | "grande";
+  docTamanhoTitulo: number | string;
   docEstiloTitulo: "negrito" | "normal";
   docAlinhamentoTitulo: "center" | "left" | "right";
+  incluirAssinaturaProgramaCerto?: boolean;
+  incluirAssinaturaCordenacao?: boolean;
+  incluirCampoAssinaturaAluno?: boolean;
   textareaRef: React.RefObject<HTMLTextAreaElement | null>;
-  onToggleBoldSelection: () => void;
-  onRemoveBoldWord: (word: string) => void;
-  onToggleAllBold: () => void;
+  onToggleBold: () => void;
 }) {
+  const currentContentSize = parseFontSize(docTamanhoConteudo, 16);
+  const isAllBold = docEstiloConteudo.trim().toLowerCase() === "tudo";
+  const hasBoldWords = !isAllBold && docEstiloConteudo.trim().length > 0;
+
   return (
     <div className="space-y-4">
       <div className="space-y-2">
@@ -305,60 +554,54 @@ function DocumentContentEditor({
             Conteúdo do Documento:
           </label>
 
-          {/* Barra de Ferramentas do Conteúdo */}
-          <div className="flex items-center gap-2 flex-wrap bg-zinc-100/90 p-1.5 rounded-xl border border-zinc-200 text-xs">
-            {/* Botão para aplicar Negrito no texto selecionado */}
-            <button
-              type="button"
-              onClick={onToggleBoldSelection}
-              title="Selecione com o mouse qualquer palavra no texto e clique aqui para marcar em negrito"
-              className="px-2.5 py-1 rounded-lg bg-white border border-zinc-300 text-zinc-900 font-extrabold text-xs flex items-center gap-1.5 shadow-2xs hover:bg-blue-50 hover:border-blue-300 hover:text-[#0b439c] transition-all cursor-pointer"
-            >
-              <Bold className="w-3.5 h-3.5 stroke-[3]" />
-              <span>+ Negrito na Seleção</span>
-            </button>
-
-            {/* Botão Todo o texto em negrito */}
-            <button
-              type="button"
-              onClick={onToggleAllBold}
-              title="Alternar se o texto inteiro fica em negrito"
-              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                docEstiloConteudo.trim().toLowerCase() === "tudo"
-                  ? "bg-zinc-900 text-white shadow-xs"
-                  : "bg-white text-zinc-600 border border-zinc-200 hover:bg-zinc-50"
-              }`}
-            >
-              <span>Todo o texto em negrito</span>
-            </button>
-
-            {/* Tamanho da Fonte */}
-            <span className="text-[10px] font-bold text-zinc-500 uppercase px-1">Tamanho:</span>
-            <div className="inline-flex rounded-lg bg-white p-0.5 border border-zinc-200 shadow-2xs">
-              {(["pequeno", "medio", "grande"] as const).map((sz) => (
-                <button
-                  key={sz}
-                  type="button"
-                  onClick={() => setDocTamanhoConteudo(sz)}
-                  className={`px-2 py-1 rounded-md text-[11px] font-bold capitalize transition-all cursor-pointer ${
-                    docTamanhoConteudo === sz
-                      ? "bg-[#0b439c] text-white shadow-xs"
-                      : "text-zinc-600 hover:text-zinc-900 hover:bg-zinc-50"
-                  }`}
-                >
-                  {sz === "medio" ? "Médio" : sz === "pequeno" ? "Pequeno" : "Grande"}
-                </button>
-              ))}
+          {/* Barra de Ferramentas do Conteúdo: 1. Tamanho [-] [num] [+], 2. [B], 3. Alinhamento no final */}
+          <div className="flex items-center gap-1.5 flex-wrap bg-zinc-100/90 p-1.5 rounded-xl border border-zinc-200 text-xs">
+            {/* 1. Tamanho da Fonte com botões [-] e [+] */}
+            <div className="inline-flex items-center bg-white rounded-lg border border-zinc-200 shadow-2xs p-0.5">
+              <button
+                type="button"
+                onClick={() => setDocTamanhoConteudo(Math.max(8, currentContentSize - 1))}
+                title="Diminuir tamanho da letra do conteúdo"
+                className="w-7 h-7 flex items-center justify-center rounded text-zinc-700 hover:bg-zinc-100 hover:text-zinc-900 font-black cursor-pointer transition-colors"
+              >
+                <Minus className="w-3.5 h-3.5" />
+              </button>
+              <span className="px-2 font-mono font-black text-xs text-zinc-900 min-w-8 text-center select-none">
+                {currentContentSize}
+              </span>
+              <button
+                type="button"
+                onClick={() => setDocTamanhoConteudo(Math.min(32, currentContentSize + 1))}
+                title="Aumentar tamanho da letra do conteúdo"
+                className="w-7 h-7 flex items-center justify-center rounded text-zinc-700 hover:bg-zinc-100 hover:text-zinc-900 font-black cursor-pointer transition-colors"
+              >
+                <Plus className="w-3.5 h-3.5" />
+              </button>
             </div>
 
-            {/* Alinhamento */}
-            <span className="text-[10px] font-bold text-zinc-500 uppercase px-1">Alinhar:</span>
-            <div className="inline-flex rounded-lg bg-white p-0.5 border border-zinc-200 shadow-2xs">
+            {/* 2. Negrito (B) "bzinho ali do lado" */}
+            <button
+              type="button"
+              onClick={onToggleBold}
+              title="Negrito (B): Se nada estiver selecionado, deixa tudo em negrito. Se selecionar uma palavra ou trecho, aplica na seleção."
+              className={`w-7 h-7 flex items-center justify-center rounded-lg border transition-all cursor-pointer font-black text-xs ${
+                isAllBold
+                  ? "bg-zinc-900 text-white border-zinc-900 shadow-xs"
+                  : hasBoldWords
+                  ? "bg-[#0b439c] text-white border-[#0b439c] shadow-xs"
+                  : "bg-white text-zinc-700 border-zinc-200 hover:bg-zinc-100"
+              }`}
+            >
+              <Bold className="w-3.5 h-3.5 stroke-[3]" />
+            </button>
+
+            {/* 3. Alinhamento no final */}
+            <div className="inline-flex items-center rounded-lg bg-white p-0.5 border border-zinc-200 shadow-2xs">
               <button
                 type="button"
                 onClick={() => setDocAlinhamentoConteudo("justify")}
                 title="Justificado (alinhado dos dois lados)"
-                className={`p-1 rounded-md transition-all cursor-pointer ${
+                className={`p-1.5 rounded-md transition-all cursor-pointer ${
                   docAlinhamentoConteudo === "justify" ? "bg-[#0b439c] text-white" : "text-zinc-600 hover:bg-zinc-50"
                 }`}
               >
@@ -368,7 +611,7 @@ function DocumentContentEditor({
                 type="button"
                 onClick={() => setDocAlinhamentoConteudo("left")}
                 title="Alinhar à esquerda"
-                className={`p-1 rounded-md transition-all cursor-pointer ${
+                className={`p-1.5 rounded-md transition-all cursor-pointer ${
                   docAlinhamentoConteudo === "left" ? "bg-[#0b439c] text-white" : "text-zinc-600 hover:bg-zinc-50"
                 }`}
               >
@@ -378,11 +621,21 @@ function DocumentContentEditor({
                 type="button"
                 onClick={() => setDocAlinhamentoConteudo("center")}
                 title="Centralizado no meio"
-                className={`p-1 rounded-md transition-all cursor-pointer ${
+                className={`p-1.5 rounded-md transition-all cursor-pointer ${
                   docAlinhamentoConteudo === "center" ? "bg-[#0b439c] text-white" : "text-zinc-600 hover:bg-zinc-50"
                 }`}
               >
                 <AlignCenter className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setDocAlinhamentoConteudo("right")}
+                title="Alinhar à direita"
+                className={`p-1.5 rounded-md transition-all cursor-pointer ${
+                  docAlinhamentoConteudo === "right" ? "bg-[#0b439c] text-white" : "text-zinc-600 hover:bg-zinc-50"
+                }`}
+              >
+                <AlignRight className="w-3.5 h-3.5" />
               </button>
             </div>
           </div>
@@ -393,122 +646,36 @@ function DocumentContentEditor({
           rows={10}
           value={docConteudo}
           onChange={(e) => setDocConteudo(e.target.value)}
-          className={`w-full p-4 rounded-xl border border-zinc-300 text-zinc-900 focus:outline-none focus:border-[#0b439c] font-sans leading-relaxed resize-y ${
-            docTamanhoConteudo === "pequeno" ? "text-xs" : docTamanhoConteudo === "grande" ? "text-base" : "text-sm"
-          } bg-zinc-50/40 focus:bg-white`}
+          className={`w-full p-4 rounded-xl border border-zinc-300 text-zinc-900 focus:outline-none focus:border-[#0b439c] font-sans text-sm sm:text-base leading-relaxed resize-y bg-zinc-50/40 focus:bg-white ${
+            isAllBold ? "font-black" : "font-normal"
+          }`}
           placeholder="Digite o texto do documento..."
           required
         />
+      </div>
 
-        {/* Gerenciador de Palavras em Negrito (estilo_conteudo) */}
-        <div className="p-3.5 bg-zinc-50 rounded-2xl border border-zinc-200/90 space-y-2.5">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-            <div className="flex items-center gap-1.5 text-xs font-bold text-zinc-800">
-              <Bold className="w-3.5 h-3.5 text-[#0b439c]" />
-              <span>Palavras configuradas em Negrito (estilo_conteudo):</span>
-            </div>
-            <span className="text-[11px] text-zinc-500">
-              Selecione o texto e clique no botão acima ou digite separando por vírgula.
-            </span>
-          </div>
-
-          {docEstiloConteudo.trim().toLowerCase() === "tudo" ? (
-            <div className="flex items-center gap-2">
-              <span className="px-3 py-1 rounded-lg bg-zinc-900 text-white font-bold text-xs flex items-center gap-2">
-                <span>O texto inteiro está configurado em Negrito</span>
-                <button
-                  type="button"
-                  onClick={() => setDocEstiloConteudo("")}
-                  className="hover:text-red-400 cursor-pointer"
-                  title="Desmarcar negrito total"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              </span>
-            </div>
-          ) : (
-            <>
-              {/* Chips de palavras marcadas */}
-              {docEstiloConteudo
-                .split(",")
-                .map((w) => w.trim())
-                .filter(Boolean).length > 0 && (
-                <div className="flex flex-wrap items-center gap-1.5">
-                  {docEstiloConteudo
-                    .split(",")
-                    .map((w) => w.trim())
-                    .filter(Boolean)
-                    .map((word, wIdx) => (
-                      <span
-                        key={wIdx}
-                        className="inline-flex items-center gap-1 px-2.5 py-1 bg-white border border-zinc-300 rounded-lg text-xs font-black text-zinc-900 shadow-2xs"
-                      >
-                        <span>{word}</span>
-                        <button
-                          type="button"
-                          onClick={() => onRemoveBoldWord(word)}
-                          className="text-zinc-400 hover:text-red-600 cursor-pointer p-0.5"
-                          title={`Remover negrito de "${word}"`}
-                        >
-                          <X className="w-3 h-3" />
-                        </button>
-                      </span>
-                    ))}
-                </div>
-              )}
-
-              <input
-                type="text"
-                value={docEstiloConteudo}
-                onChange={(e) => setDocEstiloConteudo(e.target.value)}
-                placeholder="Ex: clima, ensolarado (ou 'tudo' para o texto todo)"
-                className="w-full px-3.5 py-2 text-xs bg-white border border-zinc-300 rounded-xl focus:outline-none focus:border-[#0b439c] text-zinc-900 font-mono shadow-2xs"
-              />
-            </>
-          )}
+      {/* Pré-visualização do Documento */}
+      <div className="space-y-2 pt-2">
+        <div className="flex items-center justify-between px-1">
+          <span className="text-xs font-black uppercase tracking-wider text-zinc-600 flex items-center gap-1.5">
+            <FileText className="w-3.5 h-3.5 text-[#0b439c]" />
+            Pré-visualização do Documento
+          </span>
         </div>
 
-        {/* Pré-visualização Ao Vivo do Documento */}
-        <div className="p-4 bg-zinc-50 rounded-2xl border border-zinc-200/90 space-y-3">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-black uppercase tracking-wider text-zinc-500 flex items-center gap-1.5">
-              <FileText className="w-3.5 h-3.5 text-[#0b439c]" />
-              Pré-visualização Ao Vivo do Documento
-            </span>
-            <span className="text-[11px] text-zinc-400 font-medium">
-              Exatamente como aparecerá na impressão e no PDF
-            </span>
-          </div>
-
-          <div className="bg-white p-6 rounded-2xl border border-zinc-200 shadow-2xs space-y-4">
-            {/* Título com alinhamento, tamanho e estilo */}
-            <h3
-              className={`tracking-tight uppercase ${
-                docEstiloTitulo === "negrito" ? "font-black" : "font-medium"
-              } ${
-                docTamanhoTitulo === "pequeno" ? "text-sm" : docTamanhoTitulo === "grande" ? "text-xl" : "text-base"
-              } ${
-                docAlinhamentoTitulo === "left" ? "text-left" : docAlinhamentoTitulo === "right" ? "text-right" : "text-center"
-              } text-zinc-900`}
-            >
-              {docTitulo || "(Título do Documento)"}
-            </h3>
-
-            {/* Conteúdo com as palavras em negrito e alinhamento aplicados */}
-            <div
-              className={`leading-relaxed whitespace-pre-wrap text-zinc-800 ${
-                docTamanhoConteudo === "pequeno" ? "text-xs" : docTamanhoConteudo === "grande" ? "text-base" : "text-sm"
-              } ${
-                docAlinhamentoConteudo === "left" ? "text-left" : docAlinhamentoConteudo === "center" ? "text-center" : "text-justify"
-              }`}
-            >
-              <RenderFormattedContent
-                content={docConteudo || "Nenhum conteúdo inserido ainda."}
-                estiloConteudo={docEstiloConteudo}
-              />
-            </div>
-          </div>
-        </div>
+        <SulfiteDocumentSheet
+          titulo={docTitulo}
+          tamanhoTitulo={docTamanhoTitulo}
+          estiloTitulo={docEstiloTitulo}
+          alinhamentoTitulo={docAlinhamentoTitulo}
+          conteudo={docConteudo}
+          tamanhoConteudo={docTamanhoConteudo}
+          alinhamentoConteudo={docAlinhamentoConteudo}
+          estiloConteudo={docEstiloConteudo}
+          incluirAssinaturaProgramaCerto={incluirAssinaturaProgramaCerto}
+          incluirAssinaturaCordenacao={incluirAssinaturaCordenacao}
+          incluirCampoAssinaturaAluno={incluirCampoAssinaturaAluno}
+        />
       </div>
     </div>
   );
@@ -608,7 +775,7 @@ export function DocumentosManager({ allUsers = [], currentAdminName = "Administr
 
   // Formulário: Novo / Editar Documento
   const [docTitulo, setDocTitulo] = useState("");
-  const [docTamanhoTitulo, setDocTamanhoTitulo] = useState<"pequeno" | "medio" | "grande">("medio");
+  const [docTamanhoTitulo, setDocTamanhoTitulo] = useState<number>(18);
   const [docEstiloTitulo, setDocEstiloTitulo] = useState<"negrito" | "normal">("negrito");
   const [docAlinhamentoTitulo, setDocAlinhamentoTitulo] = useState<"center" | "left" | "right">("center");
 
@@ -617,28 +784,48 @@ export function DocumentosManager({ allUsers = [], currentAdminName = "Administr
   const [isFolderDropdownOpen, setIsFolderDropdownOpen] = useState(false);
 
   const [docConteudo, setDocConteudo] = useState("");
-  const [docTamanhoConteudo, setDocTamanhoConteudo] = useState<"pequeno" | "medio" | "grande">("medio");
-  const [docAlinhamentoConteudo, setDocAlinhamentoConteudo] = useState<"justify" | "left" | "center">("justify");
+  const [docTamanhoConteudo, setDocTamanhoConteudo] = useState<number>(16);
+  const [docAlinhamentoConteudo, setDocAlinhamentoConteudo] = useState<"justify" | "left" | "center" | "right">("justify");
   const [docEstiloConteudo, setDocEstiloConteudo] = useState<string>("");
+
+  // Aba ativa na tela view_doc: "sheet" (Folha Sulfite oficial) ou "edit" (Formulário de Edição)
+  const [viewDocTab, setViewDocTab] = useState<"sheet" | "edit">("sheet");
 
   const textareaCreateRef = useRef<HTMLTextAreaElement>(null);
   const textareaViewRef = useRef<HTMLTextAreaElement>(null);
 
-  // Manipulação de palavras em negrito no conteúdo
-  const handleToggleBoldSelection = (ref: React.RefObject<HTMLTextAreaElement | null>) => {
-    if (!ref.current) return;
-    const start = ref.current.selectionStart;
-    const end = ref.current.selectionEnd;
-    const selectedText = ref.current.value.substring(start, end).trim();
+  // Manipulação de Negrito (B):
+  // Se nada estiver selecionado, "coisa tudo" (alterna entre todo o texto em negrito e normal).
+  // Se tiver selecionado uma palavra ou texto, aplica ou remove a seleção.
+  const handleToggleBoldContent = (ref: React.RefObject<HTMLTextAreaElement | null>) => {
+    const textarea = ref.current;
+    let selectedText = "";
+    if (textarea) {
+      const start = textarea.selectionStart;
+      const end = textarea.selectionEnd;
+      if (typeof start === "number" && typeof end === "number" && end > start) {
+        selectedText = textarea.value.substring(start, end).trim();
+      }
+    }
 
+    // 1. Se não tiver nada selecionado: coisa tudo!
     if (!selectedText) {
-      setSyncFeedback("Selecione primeiro uma palavra ou frase com o cursor para aplicar o negrito.");
-      setTimeout(() => setSyncFeedback(null), 3500);
+      if (docEstiloConteudo.trim().toLowerCase() === "tudo") {
+        setDocEstiloConteudo("");
+        setSyncFeedback("Negrito total desativado.");
+      } else {
+        setDocEstiloConteudo("tudo");
+        setSyncFeedback("Todo o texto configurado em negrito.");
+      }
+      setTimeout(() => setSyncFeedback(null), 2500);
       return;
     }
 
+    // 2. Se selecionou um trecho ou palavra
     if (docEstiloConteudo.trim().toLowerCase() === "tudo") {
       setDocEstiloConteudo(selectedText);
+      setSyncFeedback(`Negrito aplicado em "${selectedText}".`);
+      setTimeout(() => setSyncFeedback(null), 2500);
       return;
     }
 
@@ -646,30 +833,20 @@ export function DocumentosManager({ allUsers = [], currentAdminName = "Administr
       ? docEstiloConteudo.split(",").map((w) => w.trim()).filter(Boolean)
       : [];
 
-    const existingIndex = currentWords.findIndex((w) => w.toLowerCase() === selectedText.toLowerCase());
+    const existingIndex = currentWords.findIndex(
+      (w) => w.toLowerCase() === selectedText.toLowerCase()
+    );
+
     let nextWords: string[];
     if (existingIndex >= 0) {
       nextWords = currentWords.filter((_, idx) => idx !== existingIndex);
+      setSyncFeedback(`Negrito removido de "${selectedText}".`);
     } else {
       nextWords = [...currentWords, selectedText];
+      setSyncFeedback(`Negrito aplicado em "${selectedText}".`);
     }
     setDocEstiloConteudo(nextWords.join(", "));
-  };
-
-  const handleRemoveBoldWord = (wordToRemove: string) => {
-    const currentWords = docEstiloConteudo
-      ? docEstiloConteudo.split(",").map((w) => w.trim()).filter(Boolean)
-      : [];
-    const updated = currentWords.filter((w) => w.toLowerCase() !== wordToRemove.toLowerCase());
-    setDocEstiloConteudo(updated.join(", "));
-  };
-
-  const handleToggleAllBold = () => {
-    if (docEstiloConteudo.trim().toLowerCase() === "tudo") {
-      setDocEstiloConteudo("");
-    } else {
-      setDocEstiloConteudo("tudo");
-    }
+    setTimeout(() => setSyncFeedback(null), 2500);
   };
 
   const [incluirAssinaturaProgramaCerto, setIncluirAssinaturaProgramaCerto] = useState(true);
@@ -758,10 +935,10 @@ export function DocumentosManager({ allUsers = [], currentAdminName = "Administr
     setIsFolderDropdownOpen(false);
 
     setDocConteudo("Declaramos para os devidos fins que o(a) estudante encontra-se regularmente matriculado(a) e ativo(a) na instituição Programa Certo.\n\nPor ser expressão da verdade, firmamos o presente documento.");
-    setDocTamanhoTitulo("medio");
+    setDocTamanhoTitulo(18);
     setDocEstiloTitulo("negrito");
     setDocAlinhamentoTitulo("center");
-    setDocTamanhoConteudo("medio");
+    setDocTamanhoConteudo(16);
     setDocAlinhamentoConteudo("justify");
     setDocEstiloConteudo("");
     setIncluirAssinaturaProgramaCerto(true);
@@ -1092,15 +1269,16 @@ export function DocumentosManager({ allUsers = [], currentAdminName = "Administr
     setIsFolderDropdownOpen(false);
 
     setDocConteudo(doc.conteudo);
-    setDocTamanhoTitulo(doc.tamanho_titulo || "medio");
-    setDocEstiloTitulo(doc.estilo_titulo || "negrito");
+    setDocTamanhoTitulo(parseFontSize(doc.tamanho_titulo, 18));
+    setDocEstiloTitulo(doc.estilo_titulo === "normal" ? "normal" : "negrito");
     setDocAlinhamentoTitulo(doc.alinhamento_titulo || "center");
-    setDocTamanhoConteudo(doc.tamanho_conteudo || "medio");
+    setDocTamanhoConteudo(parseFontSize(doc.tamanho_conteudo, 16));
     setDocAlinhamentoConteudo(doc.alinhamento_conteudo || "justify");
     setDocEstiloConteudo(doc.estilo_conteudo || "");
     setIncluirAssinaturaProgramaCerto(!!doc.incluir_assinatura_programa_certo);
     setIncluirAssinaturaCordenacao(!!doc.incluir_assinatura_cordenacao);
     setIncluirCampoAssinaturaAluno(!!doc.incluir_campo_assinatura_aluno);
+    setViewDocTab("sheet");
     setViewMode("view_doc");
     scrollToTop();
   };
@@ -1117,12 +1295,12 @@ export function DocumentosManager({ allUsers = [], currentAdminName = "Administr
       if (supabase && isSupabaseConfigured) {
         const payload: any = {
           titulo: `${d.titulo} (Cópia)`,
-          tamanho_titulo: d.tamanho_titulo || "medio",
+          tamanho_titulo: d.tamanho_titulo || 18,
           estilo_titulo: d.estilo_titulo || "negrito",
           alinhamento_titulo: d.alinhamento_titulo || "center",
           pasta_id: d.pasta_id || null,
           conteudo: d.conteudo,
-          tamanho_conteudo: d.tamanho_conteudo || "medio",
+          tamanho_conteudo: d.tamanho_conteudo || 16,
           alinhamento_conteudo: d.alinhamento_conteudo || "justify",
           estilo_conteudo: d.estilo_conteudo || "",
           incluir_assinatura_programa_certo: d.incluir_assinatura_programa_certo,
@@ -1341,7 +1519,7 @@ export function DocumentosManager({ allUsers = [], currentAdminName = "Administr
           }
           /* TÍTULO DO DOCUMENTO */
           .doc-title {
-            font-size: ${doc.tamanho_titulo === "pequeno" ? "14px" : doc.tamanho_titulo === "grande" ? "22px" : "17px"};
+            font-size: ${parseFontSize(doc.tamanho_titulo, 18)}px;
             font-weight: ${doc.estilo_titulo === "normal" ? "500" : "900"};
             text-align: ${doc.alinhamento_titulo === "left" ? "left" : doc.alinhamento_titulo === "right" ? "right" : "center"};
             margin: 24px 0 20px 0;
@@ -1351,9 +1529,9 @@ export function DocumentosManager({ allUsers = [], currentAdminName = "Administr
           }
           /* CORPO DO DOCUMENTO (Continua em novas páginas se for grande) */
           .content-box {
-            font-size: ${doc.tamanho_conteudo === "pequeno" ? "11.5px" : doc.tamanho_conteudo === "grande" ? "16px" : "13.5px"};
+            font-size: ${parseFontSize(doc.tamanho_conteudo, 16)}px;
             white-space: pre-wrap;
-            text-align: ${doc.alinhamento_conteudo === "left" ? "left" : doc.alinhamento_conteudo === "center" ? "center" : "justify"};
+            text-align: ${doc.alinhamento_conteudo === "left" ? "left" : doc.alinhamento_conteudo === "center" ? "center" : doc.alinhamento_conteudo === "right" ? "right" : "justify"};
             min-height: 300px;
             line-height: 1.8;
             color: #27272a;
@@ -1722,7 +1900,7 @@ export function DocumentosManager({ allUsers = [], currentAdminName = "Administr
               </div>
             </div>
 
-            {/* Conteúdo com Ferramentas, Negrito, Chips e Pré-visualização Ao Vivo */}
+            {/* Conteúdo com Ferramentas, Negrito B na seleção ou total, Alinhamento e Pré-visualização na Folha Sulfite */}
             <DocumentContentEditor
               docConteudo={docConteudo}
               setDocConteudo={setDocConteudo}
@@ -1731,15 +1909,15 @@ export function DocumentosManager({ allUsers = [], currentAdminName = "Administr
               docAlinhamentoConteudo={docAlinhamentoConteudo}
               setDocAlinhamentoConteudo={setDocAlinhamentoConteudo}
               docEstiloConteudo={docEstiloConteudo}
-              setDocEstiloConteudo={setDocEstiloConteudo}
               docTitulo={docTitulo}
               docTamanhoTitulo={docTamanhoTitulo}
               docEstiloTitulo={docEstiloTitulo}
               docAlinhamentoTitulo={docAlinhamentoTitulo}
+              incluirAssinaturaProgramaCerto={incluirAssinaturaProgramaCerto}
+              incluirAssinaturaCordenacao={incluirAssinaturaCordenacao}
+              incluirCampoAssinaturaAluno={incluirCampoAssinaturaAluno}
               textareaRef={textareaCreateRef}
-              onToggleBoldSelection={() => handleToggleBoldSelection(textareaCreateRef)}
-              onRemoveBoldWord={handleRemoveBoldWord}
-              onToggleAllBold={handleToggleAllBold}
+              onToggleBold={() => handleToggleBoldContent(textareaCreateRef)}
             />
 
             {/* Botões do Rodapé */}
@@ -1836,7 +2014,7 @@ export function DocumentosManager({ allUsers = [], currentAdminName = "Administr
       {/* ========================================================================= */}
       {viewMode === "view_doc" && (
         <div className="bg-white rounded-3xl border border-zinc-200/80 shadow-sm overflow-hidden animate-in fade-in duration-150">
-          <div className="p-6 border-b border-zinc-200 flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-zinc-50/70">
+          <div className="p-6 border-b border-zinc-200 flex flex-col md:flex-row md:items-center justify-between gap-4 bg-zinc-50/70">
             <div className="flex items-center gap-3">
               <button
                 type="button"
@@ -1849,11 +2027,41 @@ export function DocumentosManager({ allUsers = [], currentAdminName = "Administr
                 <ArrowLeft className="w-4 h-4" />
                 <span>Voltar para Documentos</span>
               </button>
-              <h2 className="text-xl font-black text-zinc-900 truncate max-w-md">
-                {docTitulo || "Visualizar Documento"}
+              <h2 className="text-xl font-black text-zinc-900 truncate max-w-xs sm:max-w-md">
+                {docTitulo || "Documento"}
               </h2>
             </div>
 
+            {/* Alternador de Modo: Pré-visualização vs Editar */}
+            <div className="flex items-center gap-1 bg-zinc-200/70 p-1 rounded-xl shadow-2xs self-start md:self-auto">
+              <button
+                type="button"
+                onClick={() => setViewDocTab("sheet")}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                  viewDocTab === "sheet"
+                    ? "bg-white text-[#0b439c] shadow-xs"
+                    : "text-zinc-600 hover:text-zinc-900"
+                }`}
+              >
+                <FileText className="w-3.5 h-3.5" />
+                <span>Pré-visualização do Documento</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setViewDocTab("edit")}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                  viewDocTab === "edit"
+                    ? "bg-white text-[#0b439c] shadow-xs"
+                    : "text-zinc-600 hover:text-zinc-900"
+                }`}
+              >
+                <PenTool className="w-3.5 h-3.5" />
+                <span>Editar Documento</span>
+              </button>
+            </div>
+
+            {/* Ações: Imprimir, PDF e Excluir */}
             <div className="flex items-center gap-2">
               <button
                 type="button"
@@ -1899,159 +2107,208 @@ export function DocumentosManager({ allUsers = [], currentAdminName = "Administr
             </div>
           </div>
 
-          <form onSubmit={handleSaveDocument} className="p-6 sm:p-8 space-y-6">
-            {/* Título com Ferramentas de Tamanho, Negrito e Alinhamento */}
-            <DocumentTitleEditor
-              docTitulo={docTitulo}
-              setDocTitulo={setDocTitulo}
-              docTamanhoTitulo={docTamanhoTitulo}
-              setDocTamanhoTitulo={setDocTamanhoTitulo}
-              docEstiloTitulo={docEstiloTitulo}
-              setDocEstiloTitulo={setDocEstiloTitulo}
-              docAlinhamentoTitulo={docAlinhamentoTitulo}
-              setDocAlinhamentoTitulo={setDocAlinhamentoTitulo}
-            />
+          {/* MODO 1: VISUALIZAÇÃO DIRETA DO DOCUMENTO */}
+          {viewDocTab === "sheet" ? (
+            <div className="p-4 sm:p-8 space-y-6">
+              <div className="flex items-center justify-between flex-wrap gap-3">
+                <span className="text-xs font-black uppercase tracking-wider text-zinc-600 flex items-center gap-1.5">
+                  <FileText className="w-4 h-4 text-[#0b439c]" />
+                  Pré-visualização do Documento
+                </span>
 
-            {/* Pasta de Destino com Busca Digitável */}
-            <div className="p-3.5 bg-zinc-50 border border-zinc-200 rounded-2xl space-y-2 relative">
-              <span className="text-xs font-bold text-zinc-600">Pasta:</span>
-              <div className="relative">
-                <input
-                  type="text"
-                  value={folderInputText}
-                  onChange={(e) => {
-                    setFolderInputText(e.target.value);
-                    setIsFolderDropdownOpen(true);
-                    const exact = folders.find((f) => f.nome.toLowerCase() === e.target.value.trim().toLowerCase());
-                    setDocPastaId(exact ? exact.id : null);
-                  }}
-                  onFocus={() => setIsFolderDropdownOpen(true)}
-                  placeholder="Digite o nome da pasta..."
-                  className="w-full px-3 py-1.5 rounded-lg border border-zinc-300 text-xs text-zinc-800 font-medium focus:outline-none bg-white"
-                />
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setViewDocTab("edit")}
+                    className="px-3.5 py-1.5 bg-white border border-zinc-200 text-zinc-700 hover:text-[#0b439c] hover:border-blue-300 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs"
+                  >
+                    <PenTool className="w-3.5 h-3.5" />
+                    <span>Editar Documento</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const docObj = documents.find((d) => d.id === editingDocId);
+                      if (docObj) handlePrintDoc(docObj);
+                    }}
+                    className="px-3.5 py-1.5 bg-[#0b439c] text-white hover:bg-blue-800 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-xs"
+                  >
+                    <Printer className="w-3.5 h-3.5" />
+                    <span>Imprimir</span>
+                  </button>
+                </div>
               </div>
 
-              {isFolderDropdownOpen && (
-                <div className="bg-white border border-zinc-200 rounded-xl shadow-lg overflow-hidden max-h-48 overflow-y-auto divide-y divide-zinc-100 z-20">
-                  <div
-                    onClick={() => {
-                      setDocPastaId(null);
-                      setFolderInputText("");
-                      setIsFolderDropdownOpen(false);
-                    }}
-                    className="p-2 text-xs font-bold text-zinc-600 hover:bg-zinc-100 cursor-pointer flex items-center justify-between"
-                  >
-                    <span>(Sem pasta - Fora de pasta)</span>
-                    {docPastaId === null && <Check className="w-3.5 h-3.5 text-[#0b439c]" />}
-                  </div>
+              <SulfiteDocumentSheet
+                titulo={docTitulo}
+                tamanhoTitulo={docTamanhoTitulo}
+                estiloTitulo={docEstiloTitulo}
+                alinhamentoTitulo={docAlinhamentoTitulo}
+                conteudo={docConteudo}
+                tamanhoConteudo={docTamanhoConteudo}
+                alinhamentoConteudo={docAlinhamentoConteudo}
+                estiloConteudo={docEstiloConteudo}
+                incluirAssinaturaProgramaCerto={incluirAssinaturaProgramaCerto}
+                incluirAssinaturaCordenacao={incluirAssinaturaCordenacao}
+                incluirCampoAssinaturaAluno={incluirCampoAssinaturaAluno}
+              />
+            </div>
+          ) : (
+            /* MODO 2: FORMULÁRIO DE EDIÇÃO COM FERRAMENTAS E PRÉ-VISUALIZAÇÃO AO VIVO */
+            <form onSubmit={handleSaveDocument} className="p-6 sm:p-8 space-y-6">
+              {/* Título com Ferramentas: 1. Tamanho [-] [num] [+], 2. [B], 3. Alinhar no final */}
+              <DocumentTitleEditor
+                docTitulo={docTitulo}
+                setDocTitulo={setDocTitulo}
+                docTamanhoTitulo={docTamanhoTitulo}
+                setDocTamanhoTitulo={setDocTamanhoTitulo}
+                docEstiloTitulo={docEstiloTitulo}
+                setDocEstiloTitulo={setDocEstiloTitulo}
+                docAlinhamentoTitulo={docAlinhamentoTitulo}
+                setDocAlinhamentoTitulo={setDocAlinhamentoTitulo}
+              />
 
-                  {matchedFoldersForInput.map((f) => (
+              {/* Pasta de Destino com Busca Digitável */}
+              <div className="p-3.5 bg-zinc-50 border border-zinc-200 rounded-2xl space-y-2 relative">
+                <span className="text-xs font-bold text-zinc-600">Pasta:</span>
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={folderInputText}
+                    onChange={(e) => {
+                      setFolderInputText(e.target.value);
+                      setIsFolderDropdownOpen(true);
+                      const exact = folders.find((f) => f.nome.toLowerCase() === e.target.value.trim().toLowerCase());
+                      setDocPastaId(exact ? exact.id : null);
+                    }}
+                    onFocus={() => setIsFolderDropdownOpen(true)}
+                    placeholder="Digite o nome da pasta..."
+                    className="w-full px-3 py-1.5 rounded-lg border border-zinc-300 text-xs text-zinc-800 font-medium focus:outline-none bg-white"
+                  />
+                </div>
+
+                {isFolderDropdownOpen && (
+                  <div className="bg-white border border-zinc-200 rounded-xl shadow-lg overflow-hidden max-h-48 overflow-y-auto divide-y divide-zinc-100 z-20">
                     <div
-                      key={f.id}
                       onClick={() => {
-                        setDocPastaId(f.id);
-                        setFolderInputText(f.nome);
+                        setDocPastaId(null);
+                        setFolderInputText("");
                         setIsFolderDropdownOpen(false);
                       }}
-                      className="p-2 text-xs font-bold text-zinc-800 hover:bg-blue-50 cursor-pointer flex items-center justify-between"
+                      className="p-2 text-xs font-bold text-zinc-600 hover:bg-zinc-100 cursor-pointer flex items-center justify-between"
                     >
-                      <span>📁 {f.nome}</span>
-                      {docPastaId === f.id && <Check className="w-3.5 h-3.5 text-[#0b439c]" />}
+                      <span>(Sem pasta - Fora de pasta)</span>
+                      {docPastaId === null && <Check className="w-3.5 h-3.5 text-[#0b439c]" />}
                     </div>
-                  ))}
 
-                  {folderInputText.trim() && !hasExactFolderMatch && (
-                    <div className="p-2 bg-blue-50 border-t border-blue-100">
-                      <button
-                        type="button"
-                        onClick={handleCreateFolderFromInput}
-                        className="w-full px-2.5 py-1.5 bg-[#0b439c] text-white rounded text-xs font-bold hover:bg-blue-800 cursor-pointer"
+                    {matchedFoldersForInput.map((f) => (
+                      <div
+                        key={f.id}
+                        onClick={() => {
+                          setDocPastaId(f.id);
+                          setFolderInputText(f.nome);
+                          setIsFolderDropdownOpen(false);
+                        }}
+                        className="p-2 text-xs font-bold text-zinc-800 hover:bg-blue-50 cursor-pointer flex items-center justify-between"
                       >
-                        + Criar pasta "{folderInputText.trim()}"
-                      </button>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
+                        <span>📁 {f.nome}</span>
+                        {docPastaId === f.id && <Check className="w-3.5 h-3.5 text-[#0b439c]" />}
+                      </div>
+                    ))}
 
-            {/* Configuração de Assinaturas */}
-            <div className="p-4 bg-blue-50/60 border border-blue-200/80 rounded-2xl space-y-3">
-              <span className="font-extrabold text-[#0b439c] text-xs uppercase tracking-wider">
-                Assinaturas Selecionadas:
-              </span>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
-                <label className="flex items-center gap-2 cursor-pointer font-bold text-zinc-700 bg-white p-2.5 rounded-xl border border-blue-100">
-                  <input
-                    type="checkbox"
-                    checked={incluirAssinaturaProgramaCerto}
-                    onChange={(e) => setIncluirAssinaturaProgramaCerto(e.target.checked)}
-                    className="rounded text-[#0b439c]"
-                  />
-                  <span>Assinatura Programa Certo</span>
-                </label>
-                <label className="flex items-center gap-2 cursor-pointer font-bold text-zinc-700 bg-white p-2.5 rounded-xl border border-blue-100">
-                  <input
-                    type="checkbox"
-                    checked={incluirAssinaturaCordenacao}
-                    onChange={(e) => setIncluirAssinaturaCordenacao(e.target.checked)}
-                    className="rounded text-[#0b439c]"
-                  />
-                  <span>Assinatura Coordenação</span>
-                </label>
-                <label className="flex items-center gap-2 cursor-pointer font-bold text-zinc-700 bg-white p-2.5 rounded-xl border border-blue-100">
-                  <input
-                    type="checkbox"
-                    checked={incluirCampoAssinaturaAluno}
-                    onChange={(e) => setIncluirCampoAssinaturaAluno(e.target.checked)}
-                    className="rounded text-[#0b439c]"
-                  />
-                  <span>Assinatura do Aluno</span>
-                </label>
+                    {folderInputText.trim() && !hasExactFolderMatch && (
+                      <div className="p-2 bg-blue-50 border-t border-blue-100">
+                        <button
+                          type="button"
+                          onClick={handleCreateFolderFromInput}
+                          className="w-full px-2.5 py-1.5 bg-[#0b439c] text-white rounded text-xs font-bold hover:bg-blue-800 cursor-pointer"
+                        >
+                          + Criar pasta "{folderInputText.trim()}"
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
-            </div>
 
-            {/* Conteúdo com Ferramentas, Negrito, Chips e Pré-visualização Ao Vivo */}
-            <DocumentContentEditor
-              docConteudo={docConteudo}
-              setDocConteudo={setDocConteudo}
-              docTamanhoConteudo={docTamanhoConteudo}
-              setDocTamanhoConteudo={setDocTamanhoConteudo}
-              docAlinhamentoConteudo={docAlinhamentoConteudo}
-              setDocAlinhamentoConteudo={setDocAlinhamentoConteudo}
-              docEstiloConteudo={docEstiloConteudo}
-              setDocEstiloConteudo={setDocEstiloConteudo}
-              docTitulo={docTitulo}
-              docTamanhoTitulo={docTamanhoTitulo}
-              docEstiloTitulo={docEstiloTitulo}
-              docAlinhamentoTitulo={docAlinhamentoTitulo}
-              textareaRef={textareaViewRef}
-              onToggleBoldSelection={() => handleToggleBoldSelection(textareaViewRef)}
-              onRemoveBoldWord={handleRemoveBoldWord}
-              onToggleAllBold={handleToggleAllBold}
-            />
+              {/* Configuração de Assinaturas */}
+              <div className="p-4 bg-blue-50/60 border border-blue-200/80 rounded-2xl space-y-3">
+                <span className="font-extrabold text-[#0b439c] text-xs uppercase tracking-wider">
+                  Assinaturas Selecionadas:
+                </span>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+                  <label className="flex items-center gap-2 cursor-pointer font-bold text-zinc-700 bg-white p-2.5 rounded-xl border border-blue-100">
+                    <input
+                      type="checkbox"
+                      checked={incluirAssinaturaProgramaCerto}
+                      onChange={(e) => setIncluirAssinaturaProgramaCerto(e.target.checked)}
+                      className="rounded text-[#0b439c]"
+                    />
+                    <span>Assinatura Programa Certo</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer font-bold text-zinc-700 bg-white p-2.5 rounded-xl border border-blue-100">
+                    <input
+                      type="checkbox"
+                      checked={incluirAssinaturaCordenacao}
+                      onChange={(e) => setIncluirAssinaturaCordenacao(e.target.checked)}
+                      className="rounded text-[#0b439c]"
+                    />
+                    <span>Assinatura Coordenação</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer font-bold text-zinc-700 bg-white p-2.5 rounded-xl border border-blue-100">
+                    <input
+                      type="checkbox"
+                      checked={incluirCampoAssinaturaAluno}
+                      onChange={(e) => setIncluirCampoAssinaturaAluno(e.target.checked)}
+                      className="rounded text-[#0b439c]"
+                    />
+                    <span>Assinatura do Aluno</span>
+                  </label>
+                </div>
+              </div>
 
-            <div className="flex items-center justify-end gap-3 pt-4 border-t border-zinc-200">
-              <button
-                type="button"
-                onClick={() => {
-                  setViewMode("list");
-                  scrollToTop();
-                }}
-                className="px-5 py-2.5 rounded-xl text-zinc-600 font-bold hover:bg-zinc-100 transition-colors text-sm cursor-pointer"
-              >
-                Voltar
-              </button>
-              <button
-                type="submit"
-                disabled={isSaving}
-                className="px-6 py-2.5 rounded-xl bg-[#0b439c] hover:bg-blue-800 text-white font-bold text-sm transition-colors shadow-md shadow-blue-900/15 cursor-pointer flex items-center gap-2"
-              >
-                {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-                <span>Salvar Alterações</span>
-              </button>
-            </div>
-          </form>
+              {/* Conteúdo com Ferramentas, Negrito B na seleção ou total, Alinhamento e Folha Sulfite Ao Vivo */}
+              <DocumentContentEditor
+                docConteudo={docConteudo}
+                setDocConteudo={setDocConteudo}
+                docTamanhoConteudo={docTamanhoConteudo}
+                setDocTamanhoConteudo={setDocTamanhoConteudo}
+                docAlinhamentoConteudo={docAlinhamentoConteudo}
+                setDocAlinhamentoConteudo={setDocAlinhamentoConteudo}
+                docEstiloConteudo={docEstiloConteudo}
+                docTitulo={docTitulo}
+                docTamanhoTitulo={docTamanhoTitulo}
+                docEstiloTitulo={docEstiloTitulo}
+                docAlinhamentoTitulo={docAlinhamentoTitulo}
+                incluirAssinaturaProgramaCerto={incluirAssinaturaProgramaCerto}
+                incluirAssinaturaCordenacao={incluirAssinaturaCordenacao}
+                incluirCampoAssinaturaAluno={incluirCampoAssinaturaAluno}
+                textareaRef={textareaViewRef}
+                onToggleBold={() => handleToggleBoldContent(textareaViewRef)}
+              />
+
+              <div className="flex items-center justify-end gap-3 pt-4 border-t border-zinc-200">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setViewMode("list");
+                    scrollToTop();
+                  }}
+                  className="px-5 py-2.5 rounded-xl text-zinc-600 font-bold hover:bg-zinc-100 transition-colors text-sm cursor-pointer"
+                >
+                  Voltar
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSaving}
+                  className="px-6 py-2.5 rounded-xl bg-[#0b439c] hover:bg-blue-800 text-white font-bold text-sm transition-colors shadow-md shadow-blue-900/15 cursor-pointer flex items-center gap-2"
+                >
+                  {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                  <span>Salvar Alterações</span>
+                </button>
+              </div>
+            </form>
+          )}
         </div>
       )}
 
@@ -2404,6 +2661,16 @@ export function DocumentosManager({ allUsers = [], currentAdminName = "Administr
 
                       {/* Ações rápidas */}
                       <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => handleOpenDocView(doc)}
+                          className="px-3 py-1.5 bg-blue-50 hover:bg-[#0b439c] text-[#0b439c] hover:text-white rounded-lg font-bold text-xs transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs border border-blue-200"
+                          title="Abrir Pré-visualização do Documento"
+                        >
+                          <FileText className="w-3.5 h-3.5" />
+                          <span>Pré-visualizar</span>
+                        </button>
+
                         <button
                           type="button"
                           onClick={(e) => {
