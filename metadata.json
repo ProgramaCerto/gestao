@@ -1,0 +1,6 @@
+{
+  "name": "Gestão - Conexão GitHub",
+  "description": "Aplicação integrada ao repositório GitHub gestao.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
