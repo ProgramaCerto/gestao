@@ -366,52 +366,36 @@ export function openDocumentPdfInBrowser(docItem: DocumentItem) {
 }
 
 /**
- * Aciona o painel nativo de impressão diretamente, sem abrir nova guia nem deixar aba about:blank.
- * Utiliza um iframe invisível que dispara o print e se auto-destrói após a impressão.
+ * Aciona o painel nativo de impressão do sistema/navegador para o documento.
+ * Gera o documento PDF oficial com comando AutoPrint embutido (/OpenAction /Print + JS print)
+ * e abre via Blob URL local, escapando de qualquer restrição de iframe e abrindo
+ * diretamente o diálogo nativo de impressão sem erros de cross-origin.
  */
 export function printDocumentInBrowser(docItem: DocumentItem) {
   try {
-    const existingFrame = document.getElementById("doc-silent-print-frame");
-    if (existingFrame) {
-      existingFrame.remove();
+    const doc = buildDocumentPdfDoc(docItem);
+
+    // Embutir instrução nativa de impressão automática no catálogo do PDF
+    if (typeof (doc as any).autoPrint === "function") {
+      (doc as any).autoPrint({ variant: "non-conform" });
+      (doc as any).autoPrint({ variant: "javascript" });
     }
 
-    const iframe = document.createElement("iframe");
-    iframe.id = "doc-silent-print-frame";
-    iframe.style.position = "fixed";
-    iframe.style.right = "0";
-    iframe.style.bottom = "0";
-    iframe.style.width = "0";
-    iframe.style.height = "0";
-    iframe.style.border = "0";
-    iframe.style.visibility = "hidden";
-    iframe.setAttribute("aria-hidden", "true");
-
-    const blob = generateDocumentPdfBlob(docItem);
+    const arrayBuffer = doc.output("arraybuffer");
+    const blob = new Blob([arrayBuffer], { type: "application/pdf" });
     const blobUrl = URL.createObjectURL(blob);
 
-    iframe.src = blobUrl;
+    const link = document.createElement("a");
+    link.href = blobUrl;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
 
-    iframe.onload = () => {
-      try {
-        setTimeout(() => {
-          if (iframe.contentWindow) {
-            iframe.contentWindow.focus();
-            iframe.contentWindow.print();
-          }
-          setTimeout(() => {
-            URL.revokeObjectURL(blobUrl);
-            iframe.remove();
-          }, 60000);
-        }, 150);
-      } catch (e) {
-        console.warn("Falha no print direto do iframe, fallback:", e);
-      }
-    };
-
-    document.body.appendChild(iframe);
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 120000);
   } catch (err) {
-    console.error("Erro ao imprimir documento via iframe:", err);
+    console.error("Erro ao preparar impressão de documento em PDF:", err);
   }
 }
 
