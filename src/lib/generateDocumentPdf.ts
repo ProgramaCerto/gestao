@@ -98,21 +98,54 @@ export function buildDocumentPdfDoc(docItem: DocumentItem): any {
 
   let y = drawHeader(1);
 
-  // 2. Título Centralizado do Documento
-  doc.setFontSize(14);
-  doc.setFont("helvetica", "bold");
-  doc.setTextColor(24, 24, 27);
-  const titleLines: string[] = doc.splitTextToSize(docItem.titulo.toUpperCase(), contentWidth);
-  titleLines.forEach((tLine: string) => {
-    doc.text(tLine, pageWidth / 2, y + 4, { align: "center" });
-    y += 6;
-  });
-  y += 6;
+  // 2. TÍTULO DO DOCUMENTO (Com tamanho, estilo e alinhamento customizados)
+  let titleFontSize = 14;
+  let titleLineHeight = 6;
+  if (docItem.tamanho_titulo === "pequeno") {
+    titleFontSize = 11;
+    titleLineHeight = 5;
+  } else if (docItem.tamanho_titulo === "grande") {
+    titleFontSize = 17;
+    titleLineHeight = 7.5;
+  }
 
-  // 3. Conteúdo do Documento com quebra fluida de páginas
+  const titleFontStyle = docItem.estilo_titulo === "normal" ? "normal" : "bold";
+  doc.setFontSize(titleFontSize);
+  doc.setFont("helvetica", titleFontStyle);
+  doc.setTextColor(24, 24, 27);
+
+  const titleLines: string[] = doc.splitTextToSize(docItem.titulo.toUpperCase(), contentWidth);
+  const titleAlign = docItem.alinhamento_titulo || "center";
+
+  titleLines.forEach((tLine: string) => {
+    let titleX = pageWidth / 2;
+    if (titleAlign === "left") {
+      titleX = margin;
+    } else if (titleAlign === "right") {
+      titleX = rightX;
+    }
+    doc.text(tLine, titleX, y + 4, { align: titleAlign as any });
+    y += titleLineHeight;
+  });
+  y += 5;
+
+  // 3. CONTEÚDO DO DOCUMENTO (Com tamanho, estilo negrito e quebra de páginas)
+  let contentFontSize = 10;
+  let contentLineHeight = lineHeight;
+  if (docItem.tamanho_conteudo === "pequeno") {
+    contentFontSize = 8.5;
+    contentLineHeight = 4.4;
+  } else if (docItem.tamanho_conteudo === "grande") {
+    contentFontSize = 12;
+    contentLineHeight = 6.2;
+  }
+
+  const isAllBold = (docItem.estilo_conteudo || "").trim().toLowerCase() === "tudo" || (docItem.estilo_conteudo || "").trim().toLowerCase() === "todo";
+  const defaultFontStyle = isAllBold ? "bold" : "normal";
+
   const textContent = docItem.conteudo?.trim() || "";
-  doc.setFontSize(10);
-  doc.setFont("helvetica", "normal");
+  doc.setFontSize(contentFontSize);
+  doc.setFont("helvetica", defaultFontStyle);
   doc.setTextColor(39, 39, 42);
 
   const paragraphs = textContent.split("\n");
@@ -124,14 +157,14 @@ export function buildDocumentPdfDoc(docItem: DocumentItem): any {
 
     const lines: string[] = doc.splitTextToSize(para, contentWidth);
     for (const line of lines) {
-      if (y + lineHeight > maxContentY - 45) {
+      if (y + contentLineHeight > maxContentY - 45) {
         y = addNewDocPage();
-        doc.setFontSize(10);
-        doc.setFont("helvetica", "normal");
+        doc.setFontSize(contentFontSize);
+        doc.setFont("helvetica", defaultFontStyle);
         doc.setTextColor(39, 39, 42);
       }
       doc.text(line, margin, y);
-      y += lineHeight;
+      y += contentLineHeight;
     }
     y += 2.5;
   }
