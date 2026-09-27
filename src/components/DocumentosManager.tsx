@@ -2032,36 +2032,7 @@ export function DocumentosManager({ allUsers = [], currentAdminName = "Administr
               </h2>
             </div>
 
-            {/* Alternador de Modo: Pré-visualização vs Editar */}
-            <div className="flex items-center gap-1 bg-zinc-200/70 p-1 rounded-xl shadow-2xs self-start md:self-auto">
-              <button
-                type="button"
-                onClick={() => setViewDocTab("sheet")}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
-                  viewDocTab === "sheet"
-                    ? "bg-white text-[#0b439c] shadow-xs"
-                    : "text-zinc-600 hover:text-zinc-900"
-                }`}
-              >
-                <FileText className="w-3.5 h-3.5" />
-                <span>Pré-visualização do Documento</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setViewDocTab("edit")}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
-                  viewDocTab === "edit"
-                    ? "bg-white text-[#0b439c] shadow-xs"
-                    : "text-zinc-600 hover:text-zinc-900"
-                }`}
-              >
-                <PenTool className="w-3.5 h-3.5" />
-                <span>Editar Documento</span>
-              </button>
-            </div>
-
-            {/* Ações: Imprimir, PDF e Excluir */}
+            {/* Ações: Abrir na Web, Imprimir e Excluir */}
             <div className="flex items-center gap-2">
               <button
                 type="button"
