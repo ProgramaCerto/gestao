@@ -35,7 +35,7 @@ import {
 } from "lucide-react";
 import { supabase, isSupabaseConfigured } from "../lib/supabase";
 import { LOGO_PROGRAMA_CERTO_BASE64 } from "../lib/logoBase64";
-import { openDocumentPdfInBrowser } from "../lib/generateDocumentPdf";
+import { openDocumentPdfInBrowser, printDocumentInBrowser } from "../lib/generateDocumentPdf";
 
 export interface DocFolder {
   id: string;
@@ -715,7 +715,25 @@ export function DocumentosManager({ allUsers = [], currentAdminName = "Administr
 
   // Função para rolar até o topo da tela
   const scrollToTop = () => {
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    if (typeof window !== "undefined") {
+      window.scrollTo({ top: 0, left: 0, behavior: "smooth" });
+      document.documentElement.scrollTop = 0;
+      document.body.scrollTop = 0;
+      const mainScroll = document.getElementById("main-scroll-container");
+      if (mainScroll) {
+        mainScroll.scrollTo({ top: 0, left: 0, behavior: "smooth" });
+        mainScroll.scrollTop = 0;
+      }
+      const mainEl = document.querySelector("main");
+      if (mainEl) {
+        mainEl.scrollTo({ top: 0, left: 0, behavior: "smooth" });
+        mainEl.scrollTop = 0;
+      }
+      const rootEl = document.getElementById("root");
+      if (rootEl) {
+        rootEl.scrollTop = 0;
+      }
+    }
   };
 
   // Carregar dados reais do Supabase (tabelas: pastas e documentos)
@@ -1447,271 +1465,11 @@ export function DocumentosManager({ allUsers = [], currentAdminName = "Administr
     }
   };
 
-  // Impressão oficial do documento - NO MESMO ESQUEMA DO ATENDIMENTO
+  // Impressão oficial do documento - Abre direto o painel de impressão, sem abrir nova guia nem página about:blank
   const handlePrintDoc = (doc: DocumentItem) => {
-    const printWindow = window.open("", "_blank");
-    if (!printWindow) {
-      alert("Por favor, permita popups para imprimir o documento.");
-      return;
-    }
-
-    const dataAtual = new Date().toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" });
-    const horaAtual = new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
-
-    const html = `
-      <!DOCTYPE html>
-      <html lang="pt-BR">
-      <head>
-        <meta charset="utf-8">
-        <title>${doc.titulo} - Programa Certo</title>
-        <style>
-          @page {
-            size: A4 portrait;
-            margin: 18mm;
-          }
-          * { box-sizing: border-box; }
-          body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            color: #18181b;
-            line-height: 1.6;
-            margin: 0;
-            padding: 16px;
-            background: #ffffff;
-          }
-          /* CABEÇALHO IDÊNTICO AO DO ATENDIMENTO */
-          .header {
-            display: flex;
-            align-items: center;
-            gap: 14px;
-            border-bottom: 1px solid #e2e8f0;
-            padding-bottom: 14px;
-            margin-bottom: 24px;
-          }
-          .logo-img {
-            width: 52px;
-            height: 52px;
-            border-radius: 12px;
-            object-fit: cover;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
-          }
-          .brand-info {
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-          }
-          .brand-title {
-            font-size: 20px;
-            font-weight: 800;
-            margin: 0;
-            line-height: 1.1;
-            color: #18181b;
-          }
-          .brand-title span {
-            color: #0b439c;
-          }
-          .brand-subtitle {
-            font-size: 11px;
-            font-weight: 700;
-            color: #64748b;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            margin-top: 4px;
-          }
-          /* TÍTULO DO DOCUMENTO */
-          .doc-title {
-            font-size: ${parseFontSize(doc.tamanho_titulo, 18)}px;
-            font-weight: ${doc.estilo_titulo === "normal" ? "500" : "900"};
-            text-align: ${doc.alinhamento_titulo === "left" ? "left" : doc.alinhamento_titulo === "right" ? "right" : "center"};
-            margin: 24px 0 20px 0;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            color: #18181b;
-          }
-          /* CORPO DO DOCUMENTO (Continua em novas páginas se for grande) */
-          .content-box {
-            font-size: ${parseFontSize(doc.tamanho_conteudo, 16)}px;
-            white-space: pre-wrap;
-            text-align: ${doc.alinhamento_conteudo === "left" ? "left" : doc.alinhamento_conteudo === "center" ? "center" : doc.alinhamento_conteudo === "right" ? "right" : "justify"};
-            min-height: 300px;
-            line-height: 1.8;
-            color: #27272a;
-            margin-bottom: 25px;
-            page-break-inside: auto;
-          }
-          .content-box strong {
-            font-weight: 900;
-            color: #09090b;
-          }
-          /* CAIXA DE HOMOLOGAÇÃO E ASSINATURAS IDÊNTICA À CENTRAL DE ATENDIMENTO */
-          .sign-box-container {
-            border: 1px solid #cbd5e1;
-            border-radius: 10px;
-            padding: 16px 20px;
-            background: #ffffff;
-            margin-top: 25px;
-            page-break-inside: avoid;
-          }
-          .sign-box-title {
-            font-size: 9px;
-            font-weight: 800;
-            color: #64748b;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            margin-bottom: 18px;
-          }
-          .signatures-grid {
-            display: flex;
-            align-items: flex-end;
-            justify-content: space-between;
-            gap: 20px;
-            flex-wrap: wrap;
-          }
-          .signature-col {
-            flex: 1;
-            min-width: 170px;
-            text-align: center;
-          }
-          .sign-chancela {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 6px;
-            margin-bottom: 8px;
-          }
-          .sign-chancela img {
-            width: 22px;
-            height: 22px;
-            border-radius: 4px;
-          }
-          .sign-chancela-text {
-            font-size: 11px;
-            font-weight: 800;
-            color: #000000;
-          }
-          .sign-chancela-text span {
-            color: #82B7FF;
-          }
-          .sign-line {
-            border-top: 1.2px solid #18181b;
-            margin-bottom: 5px;
-          }
-          .sign-role {
-            font-size: 11px;
-            font-weight: 800;
-            color: #18181b;
-            margin: 0;
-          }
-          .sign-subrole {
-            font-size: 9.5px;
-            color: #64748b;
-            margin-top: 2px;
-          }
-          /* RODAPÉ NO FINAL DA PÁGINA (Com emitido em e as) */
-          .footer {
-            border-top: 1px solid #e2e8f0;
-            padding-top: 10px;
-            margin-top: 35px;
-            display: flex;
-            justify-content: space-between;
-            font-size: 9px;
-            color: #94a3b8;
-            page-break-inside: avoid;
-          }
-          .footer strong {
-            color: #475569;
-          }
-          @media print {
-            body { padding: 0; }
-          }
-        </style>
-      </head>
-      <body>
-        <!-- 1. CABEÇALHO IDÊNTICO AO ATENDIMENTO -->
-        <div class="header">
-          <img src="${LOGO_PROGRAMA_CERTO_BASE64}" alt="Logo Programa Certo" class="logo-img" />
-          <div class="brand-info">
-            <h1 class="brand-title">Programa <span>Certo</span></h1>
-            <div class="brand-subtitle">Plataforma Educacional</div>
-          </div>
-        </div>
-
-        <!-- 2. TÍTULO DO DOCUMENTO -->
-        <h2 class="doc-title">${doc.titulo}</h2>
-
-        <!-- 3. CONTEÚDO DO DOCUMENTO (Permite fluxo para várias páginas se grande) -->
-        <div class="content-box">${formatContentWithBoldHtml(doc.conteudo, doc.estilo_conteudo)}</div>
-
-        <!-- 4. CAIXA DE ASSINATURA E HOMOLOGAÇÃO (Logo acima da linha de assinatura) -->
-        <div class="sign-box-container">
-          <div class="sign-box-title">HOMOLOGAÇÃO E ASSINATURAS INSTITUCIONAIS</div>
-
-          <div class="signatures-grid">
-            <!-- Assinatura 1: Programa Certo (Logo ACIMA da linha com o nome) -->
-            ${
-              doc.incluir_assinatura_programa_certo
-                ? `
-              <div class="signature-col">
-                <div class="sign-chancela">
-                  <img src="${LOGO_PROGRAMA_CERTO_BASE64}" alt="Logo" />
-                  <span class="sign-chancela-text">Programa <span>Certo</span></span>
-                </div>
-                <div class="sign-line"></div>
-                <div class="sign-role">Gestor Responsável</div>
-                <div class="sign-subrole">Administração Programa Certo</div>
-              </div>
-              `
-                : ""
-            }
-
-            <!-- Assinatura 2: Coordenação (com campo Data: __ / __ / ____) -->
-            ${
-              doc.incluir_assinatura_cordenacao
-                ? `
-              <div class="signature-col">
-                <div style="height: 30px;"></div>
-                <div class="sign-line"></div>
-                <div class="sign-role">Data: ____ / ____ / ________</div>
-                <div class="sign-subrole">Visto da Coordenação</div>
-              </div>
-              `
-                : ""
-            }
-
-            <!-- Assinatura 3: Aluno (se ativado) -->
-            ${
-              doc.incluir_campo_assinatura_aluno
-                ? `
-              <div class="signature-col">
-                <div style="height: 30px;"></div>
-                <div class="sign-line"></div>
-                <div class="sign-role">Assinatura do Aluno</div>
-                <div class="sign-subrole">Estudante / Responsável Legal</div>
-              </div>
-              `
-                : ""
-            }
-          </div>
-        </div>
-
-        <!-- 5. RODAPÉ OFICIAL NO FINAL: Emitido em DD/MM/AAAA às HH:MM -->
-        <div class="footer">
-          <div><strong>Programa Certo</strong> — Plataforma Educacional</div>
-          <div>Emitido em: ${dataAtual} às ${horaAtual}</div>
-        </div>
-
-        <script>
-          window.onload = function() {
-            window.print();
-          };
-        </script>
-      </body>
-      </html>
-    `;
-
-    printWindow.document.open();
-    printWindow.document.write(html);
-    printWindow.document.close();
+    printDocumentInBrowser(doc);
   };
+
 
   return (
     <motion.div

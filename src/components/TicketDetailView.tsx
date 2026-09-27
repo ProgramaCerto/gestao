@@ -154,7 +154,10 @@ export const TicketDetailView: React.FC<TicketDetailViewProps> = ({
     }
   };
 
-  // Handle print using dedicated isolated print iframe
+  const handleBackWithScroll = () => {
+    scrollPageToTop();
+    onBack();
+  };
   const enrichedTicketForPdf: AtendimentoItem = {
     ...ticket,
     user_id: rawUserId ? effectiveUserId : ticket.user_id,
@@ -216,7 +219,7 @@ export const TicketDetailView: React.FC<TicketDetailViewProps> = ({
       {/* Barra Superior de Navegação e Ações */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 no-print">
         <button
-          onClick={onBack}
+          onClick={handleBackWithScroll}
           className="px-4 py-2.5 bg-white hover:bg-zinc-50 border border-zinc-200/80 rounded-2xl text-xs sm:text-sm font-bold text-zinc-700 hover:text-zinc-900 transition-all flex items-center gap-2 cursor-pointer shadow-2xs"
         >
           <ArrowLeft className="w-4 h-4 text-zinc-500" />
@@ -714,7 +717,7 @@ export const TicketDetailView: React.FC<TicketDetailViewProps> = ({
       {showBottomBackButton && (
         <div className="pt-2 flex justify-start no-print">
           <button
-            onClick={onBack}
+            onClick={handleBackWithScroll}
             className="px-4 py-2.5 bg-white hover:bg-zinc-50 border border-zinc-200/80 rounded-2xl text-xs font-bold text-zinc-700 hover:text-zinc-900 transition-all flex items-center gap-2 cursor-pointer shadow-2xs"
           >
             <ArrowLeft className="w-4 h-4 text-zinc-500" />

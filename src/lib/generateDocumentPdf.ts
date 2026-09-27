@@ -177,11 +177,16 @@ export function buildDocumentPdfDoc(docItem: DocumentItem): any {
 
   y += 5;
 
-  // 4. Caixa de Homologação e Assinaturas (Mesmo esquema do atendimento)
+  // 4. Caixa de Homologação e Assinaturas (Mesmo esquema do atendimento - sempre ancorada no final da folha, acima do rodapé)
   const signBoxHeight = 35;
-  if (y + signBoxHeight > maxContentY) {
+  const bottomAnchoredSignY = footerY - signBoxHeight - 6; // Posicionada no final da folha, acima do rodapé oficial
+
+  // Se o conteúdo ultrapassou o espaço antes da caixa ancorada no final, cria nova página para as assinaturas
+  if (y > bottomAnchoredSignY) {
     y = addNewDocPage();
   }
+  // Posiciona a caixa de assinaturas sempre no final da página (acima do rodapé oficial)
+  y = Math.max(y, bottomAnchoredSignY);
 
   doc.setFillColor(255, 255, 255);
   doc.setDrawColor(203, 213, 225);
@@ -359,3 +364,54 @@ export function openDocumentPdfInBrowser(docItem: DocumentItem) {
     console.error("Erro ao abrir Documento PDF na Web:", err);
   }
 }
+
+/**
+ * Aciona o painel nativo de impressão diretamente, sem abrir nova guia nem deixar aba about:blank.
+ * Utiliza um iframe invisível que dispara o print e se auto-destrói após a impressão.
+ */
+export function printDocumentInBrowser(docItem: DocumentItem) {
+  try {
+    const existingFrame = document.getElementById("doc-silent-print-frame");
+    if (existingFrame) {
+      existingFrame.remove();
+    }
+
+    const iframe = document.createElement("iframe");
+    iframe.id = "doc-silent-print-frame";
+    iframe.style.position = "fixed";
+    iframe.style.right = "0";
+    iframe.style.bottom = "0";
+    iframe.style.width = "0";
+    iframe.style.height = "0";
+    iframe.style.border = "0";
+    iframe.style.visibility = "hidden";
+    iframe.setAttribute("aria-hidden", "true");
+
+    const blob = generateDocumentPdfBlob(docItem);
+    const blobUrl = URL.createObjectURL(blob);
+
+    iframe.src = blobUrl;
+
+    iframe.onload = () => {
+      try {
+        setTimeout(() => {
+          if (iframe.contentWindow) {
+            iframe.contentWindow.focus();
+            iframe.contentWindow.print();
+          }
+          setTimeout(() => {
+            URL.revokeObjectURL(blobUrl);
+            iframe.remove();
+          }, 60000);
+        }, 150);
+      } catch (e) {
+        console.warn("Falha no print direto do iframe, fallback:", e);
+      }
+    };
+
+    document.body.appendChild(iframe);
+  } catch (err) {
+    console.error("Erro ao imprimir documento via iframe:", err);
+  }
+}
+
