@@ -53,17 +53,22 @@ export const TicketPdfView: React.FC<TicketPdfViewProps> = ({
          initialTicket.id.toLowerCase().replace("atend-", "") === protocolo.toLowerCase().replace("atend-", ""))
       ) {
         let t = { ...initialTicket };
+        const rawMat = t.matricula_usuario || t.user_id || t.id_do_usuario;
         // Se faltar email, busca no usuarios
-        if (!t.email?.trim() && (t.user_id || t.nome)) {
+        if (!t.email?.trim() && (rawMat || t.nome)) {
           try {
             const { data: usr } = await supabase
               .from("usuarios")
-              .select("email, nome")
-              .or(`id.eq.${t.user_id || "00000000-0000-0000-0000-000000000000"},nome.ilike.${t.nome}`)
+              .select("email, nome, matricula")
+              .or(`matricula.eq.${rawMat || "000000"},nome.ilike.${t.nome}`)
               .limit(1)
               .maybeSingle();
             if (usr?.email) {
               t.email = usr.email;
+            }
+            if (usr?.matricula && !t.matricula_usuario) {
+              t.matricula_usuario = usr.matricula;
+              t.user_id = usr.matricula;
             }
           } catch (e) {}
         }
@@ -89,15 +94,20 @@ export const TicketPdfView: React.FC<TicketPdfViewProps> = ({
           );
           if (found && isMounted) {
             let t = { ...found };
-            if (!t.email?.trim() && (t.user_id || t.nome)) {
+            const rawMat = t.matricula_usuario || t.user_id || t.id_do_usuario;
+            if (!t.email?.trim() && (rawMat || t.nome)) {
               try {
                 const { data: usr } = await supabase
                   .from("usuarios")
-                  .select("email, nome")
-                  .or(`id.eq.${t.user_id || "00000000-0000-0000-0000-000000000000"},nome.ilike.${t.nome}`)
+                  .select("email, nome, matricula")
+                  .or(`matricula.eq.${rawMat || "000000"},nome.ilike.${t.nome}`)
                   .limit(1)
                   .maybeSingle();
                 if (usr?.email) t.email = usr.email;
+                if (usr?.matricula && !t.matricula_usuario) {
+                  t.matricula_usuario = usr.matricula;
+                  t.user_id = usr.matricula;
+                }
               } catch (e) {}
             }
             setTicket(t);
@@ -123,13 +133,14 @@ export const TicketPdfView: React.FC<TicketPdfViewProps> = ({
             console.warn("Erro ao buscar no Supabase:", dbError);
           } else if (data && isMounted) {
             let userEmail = data.email || "";
+            const dbMat = data.matricula_usuario || data.id_do_usuario || data.user_id || "";
             // Buscar email correspondente na tabela usuarios
-            if (!userEmail && (data.id_do_usuario || data.nome)) {
+            if (!userEmail && (dbMat || data.nome)) {
               try {
                 const { data: usr } = await supabase
                   .from("usuarios")
-                  .select("email, nome")
-                  .or(`id.eq.${data.id_do_usuario || "00000000-0000-0000-0000-000000000000"},nome.ilike.${data.nome}`)
+                  .select("email, nome, matricula")
+                  .or(`matricula.eq.${dbMat || "000000"},nome.ilike.${data.nome}`)
                   .limit(1)
                   .maybeSingle();
                 if (usr?.email) userEmail = usr.email;
@@ -138,7 +149,8 @@ export const TicketPdfView: React.FC<TicketPdfViewProps> = ({
 
             const parsed: AtendimentoItem = {
               id: data.id,
-              user_id: data.id_do_usuario || data.user_id,
+              matricula_usuario: dbMat,
+              user_id: dbMat,
               nome: data.nome || "Usuário",
               email: userEmail,
               tipo: data.tipo || "Geral",

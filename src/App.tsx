@@ -75,6 +75,8 @@ import { TERMS_PLAIN_TEXT_FOR_CLIPBOARD } from "./data/termsOfUse";
 import {
   generateTicketPdf,
   openTicketPdfInBrowser,
+  extractMatricula,
+  generateMatricula,
   formatUserUidWithSixDigits,
   getUserSixDigitSuffix,
   generateUniqueUserUUID,
@@ -93,6 +95,7 @@ import { User as SupabaseUser } from "@supabase/supabase-js";
 
 export interface AtendimentoItem {
   id: string;
+  matricula_usuario?: string;
   user_id?: string;
   id_do_usuario?: string;
   nome: string;
@@ -272,6 +275,7 @@ export default function App() {
   // Full Screen Blocked Account Info State
   const [blockedAccountInfo, setBlockedAccountInfo] = useState<{
     id?: string;
+    matricula?: string;
     email?: string;
     name?: string;
     motivo?: string;
@@ -625,34 +629,49 @@ export default function App() {
             .select("*")
             .order("criado_em", { ascending: false });
           if (!error && Array.isArray(data)) {
-            // Resolver emails da tabela usuarios para garantir que o solicitante tenha nome e email
+            // Resolver emails e matrículas da tabela usuarios para garantir que o solicitante tenha nome, email e matrícula
             const emailMap = new Map<string, string>();
+            const matriculaMap = new Map<string, string>();
             try {
               const { data: dbUsers } = await supabase
                 .from("usuarios")
-                .select("id, nome, email");
+                .select("*");
               if (dbUsers && Array.isArray(dbUsers)) {
                 dbUsers.forEach((u: any) => {
-                  if (u.id && u.email) emailMap.set(u.id, u.email);
+                  const uKey = String(u.matricula || u.id || "").trim();
+                  const uMat = extractMatricula(uKey);
+                  if (uKey && u.email) emailMap.set(uKey, u.email);
+                  if (uMat && u.email) emailMap.set(uMat, u.email);
                   if (u.nome && u.email) emailMap.set(u.nome.toLowerCase().trim(), u.email);
+                  if (uKey && uMat) matriculaMap.set(uKey, uMat);
+                  if (u.nome && uMat) matriculaMap.set(u.nome.toLowerCase().trim(), uMat);
+                  if (u.email && uMat) matriculaMap.set(u.email.toLowerCase().trim(), uMat);
                 });
               }
             } catch (uErr) {
-              console.warn("Aviso ao buscar emails para atendimentos:", uErr);
+              console.warn("Aviso ao buscar emails/matrículas para atendimentos:", uErr);
             }
 
             fetched = data.map((row: any) => {
-              const uId = row.user_id || row.id_do_usuario || "";
+              const rawMatOrId = String(row.matricula_usuario || row.user_id || row.id_do_usuario || "").trim();
               const uName = row.nome || "Usuário";
               const resolvedEmail = row.email || 
-                emailMap.get(uId) || 
+                emailMap.get(rawMatOrId) || 
+                emailMap.get(extractMatricula(rawMatOrId)) ||
                 emailMap.get(uName.toLowerCase().trim()) || 
-                (user && (user.id === uId || user.user_metadata?.nome === uName) ? user.email : "");
+                (user && (user.id === rawMatOrId || user.user_metadata?.nome === uName) ? user.email : "");
+              const resolvedMat =
+                (row.matricula_usuario ? extractMatricula(row.matricula_usuario) : "") ||
+                matriculaMap.get(rawMatOrId) ||
+                (resolvedEmail ? matriculaMap.get(resolvedEmail.toLowerCase().trim()) : "") ||
+                matriculaMap.get(uName.toLowerCase().trim()) ||
+                (rawMatOrId ? extractMatricula(rawMatOrId) : "");
 
               return {
                 id: String(row.id),
-                user_id: uId,
-                id_do_usuario: uId,
+                matricula_usuario: resolvedMat || rawMatOrId,
+                user_id: resolvedMat || rawMatOrId,
+                id_do_usuario: resolvedMat || rawMatOrId,
                 nome: uName,
                 email: resolvedEmail,
                 tipo: row.tipo || "Geral",
@@ -710,7 +729,7 @@ export default function App() {
   }, [activeTab, loadTickets]);
 
   // Buscar atendimento existente para usuário com conta bloqueada EXCLUSIVAMENTE pelo banco de dados (sem localStorage)
-  const loadBlockedUserTicket = useCallback(async (accountInfo: { id?: string; email?: string; name?: string } | null) => {
+  const loadBlockedUserTicket = useCallback(async (accountInfo: { id?: string; matricula?: string; email?: string; name?: string } | null) => {
     if (!accountInfo) {
       setBlockedUserTicket(null);
       return;
@@ -736,14 +755,30 @@ export default function App() {
       }
 
       let matchedRow: any = null;
+      const targetMat = accountInfo.matricula || (accountInfo.id ? extractMatricula(accountInfo.id) : "");
       const targetId = accountInfo.id;
       const targetName = accountInfo.name?.trim();
 
-      // 1. Consultar por id_do_usuario (se for UUID válido) e tipo "Bloqueio de Conta"
-      if (targetId && isValidUUID(targetId)) {
+      // 1. Consultar por matricula_usuario e tipo "Bloqueio de Conta"
+      if (targetMat) {
         const { data, error } = await client
           .from("atendimentos")
-          .select("id, id_do_usuario, nome, tipo, mensagem, status, mensagem_respondida, respondido_em, criado_em")
+          .select("*")
+          .eq("matricula_usuario", targetMat)
+          .eq("tipo", "Bloqueio de Conta")
+          .order("criado_em", { ascending: false })
+          .limit(1);
+
+        if (!error && Array.isArray(data) && data.length > 0) {
+          matchedRow = data[0];
+        }
+      }
+
+      // 2. Fallback: consultar por id_do_usuario se não encontrou por matricula_usuario
+      if (!matchedRow && targetId) {
+        const { data, error } = await client
+          .from("atendimentos")
+          .select("*")
           .eq("id_do_usuario", targetId)
           .eq("tipo", "Bloqueio de Conta")
           .order("criado_em", { ascending: false })
@@ -754,11 +789,11 @@ export default function App() {
         }
       }
 
-      // 2. Se não encontrou por UUID e houver nome do usuário, consultar por nome e tipo "Bloqueio de Conta"
+      // 3. Se não encontrou e houver nome do usuário, consultar por nome e tipo "Bloqueio de Conta"
       if (!matchedRow && targetName) {
         const { data, error } = await client
           .from("atendimentos")
-          .select("id, id_do_usuario, nome, tipo, mensagem, status, mensagem_respondida, respondido_em, criado_em")
+          .select("*")
           .eq("nome", targetName)
           .eq("tipo", "Bloqueio de Conta")
           .order("criado_em", { ascending: false })
@@ -770,12 +805,14 @@ export default function App() {
       }
 
       if (matchedRow) {
+        const resolvedMat = matchedRow.matricula_usuario || matchedRow.id_do_usuario || targetMat || accountInfo.id || "";
         const foundTicket: AtendimentoItem = {
           id: String(matchedRow.id),
-          user_id: matchedRow.id_do_usuario || accountInfo.id || "",
-          id_do_usuario: matchedRow.id_do_usuario || accountInfo.id || "",
+          matricula_usuario: extractMatricula(resolvedMat),
+          user_id: resolvedMat,
+          id_do_usuario: resolvedMat,
           nome: matchedRow.nome || accountInfo.name || "Usuário",
-          email: accountInfo.email || "",
+          email: matchedRow.email || accountInfo.email || "",
           tipo: "Bloqueio de Conta",
           mensagem: matchedRow.mensagem || "",
           status: matchedRow.status === "Pendente" ? "Aguardando" : (matchedRow.status || "Aguardando"),
@@ -824,7 +861,8 @@ export default function App() {
 
     const ticketId = `ATEND-${new Date().getFullYear()}-${Math.floor(100000 + Math.random() * 900000)}`;
     const currentUserName = studentName || user?.user_metadata?.nome || user?.email?.split("@")[0] || "Estudante";
-    const currentUserId = user?.id || (typeof window !== "undefined" ? localStorage.getItem("aluradev_temp_user_id") : null) || `usr-${Date.now()}`;
+    const currentUserId = (user as any)?.matricula || user?.id || (typeof window !== "undefined" ? localStorage.getItem("aluradev_temp_user_id") : null) || `usr-${Date.now()}`;
+    const currentUserMatricula = extractMatricula(currentUserId, allUsers);
     const currentUserEmail = user?.email || "";
 
     const finalTipo = ticketType === "Outro"
@@ -833,7 +871,9 @@ export default function App() {
 
     const newTicket: AtendimentoItem = {
       id: ticketId,
-      user_id: currentUserId,
+      matricula_usuario: currentUserMatricula,
+      user_id: currentUserMatricula,
+      id_do_usuario: currentUserMatricula,
       nome: currentUserName,
       email: currentUserEmail,
       tipo: finalTipo,
@@ -847,16 +887,28 @@ export default function App() {
       const client = getAtendimentoClient();
       if (client) {
         try {
-          const validUserId = isValidUUID(newTicket.user_id) ? newTicket.user_id : null;
-          await client.from("atendimentos").insert({
+          const { error: insErr } = await client.from("atendimentos").insert({
             id: newTicket.id,
-            id_do_usuario: validUserId,
+            matricula_usuario: currentUserMatricula,
             nome: newTicket.nome,
+            email: newTicket.email,
             tipo: newTicket.tipo,
             mensagem: newTicket.mensagem,
             status: newTicket.status,
             criado_em: newTicket.criado_em
           });
+          if (insErr) {
+            const validUserId = isValidUUID(currentUserId) ? currentUserId : null;
+            await client.from("atendimentos").insert({
+              id: newTicket.id,
+              id_do_usuario: validUserId,
+              nome: newTicket.nome,
+              tipo: newTicket.tipo,
+              mensagem: newTicket.mensagem,
+              status: newTicket.status,
+              criado_em: newTicket.criado_em
+            });
+          }
         } catch (dbErr) {
           console.warn("Aviso ao inserir no Supabase (fallback local ativo):", dbErr);
         }
@@ -914,31 +966,32 @@ export default function App() {
       }
     }
 
-    // 2. Se for apelação de bloqueio e admin marcou para desbloquear (usando exclusivamente as colunas reais da tabela usuarios: acesso, motivo)
+    // 2. Se for apelação de bloqueio e admin marcou para desbloquear (usando as colunas reais da tabela usuarios: matricula, acesso, motivo)
     if (shouldUnblock && targetTicket && supabase) {
-      const rawUserId = targetTicket.user_id || targetTicket.id_do_usuario || "";
+      const rawUserMatOrId = targetTicket.matricula_usuario || targetTicket.user_id || targetTicket.id_do_usuario || "";
       const rawUserEmail = targetTicket.email?.toLowerCase().trim() || "";
       const rawUserName = targetTicket.nome?.trim() || "";
 
       const matchedUser = allUsers.find(u =>
-        (rawUserId && u.id && u.id === rawUserId) ||
+        (rawUserMatOrId && (u.matricula === rawUserMatOrId || u.id === rawUserMatOrId || extractMatricula(u.matricula || u.id, allUsers) === extractMatricula(rawUserMatOrId, allUsers))) ||
         (rawUserEmail && u.email && u.email.toLowerCase().trim() === rawUserEmail) ||
         (rawUserName && (u.nome || u.name || "").toLowerCase().trim() === rawUserName.toLowerCase())
       );
 
-      const finalUserId = isValidUUID(rawUserId)
-        ? rawUserId
-        : (matchedUser?.id && isValidUUID(matchedUser.id) ? matchedUser.id : "");
+      const finalUserMat = matchedUser?.matricula || matchedUser?.id || rawUserMatOrId;
       const finalUserEmail = rawUserEmail || (matchedUser?.email ? matchedUser.email.toLowerCase().trim() : "");
 
       try {
-        if (finalUserId) {
-          const { error: errById } = await supabase
+        if (finalUserMat) {
+          const { error: errByMat } = await supabase
             .from("usuarios")
             .update({ acesso: "Liberado", motivo: null })
-            .eq("id", finalUserId);
-          if (errById) {
-            console.error("Erro ao desbloquear usuário por ID:", errById);
+            .eq("matricula", finalUserMat);
+          if (errByMat && isValidUUID(finalUserMat)) {
+            await supabase
+              .from("usuarios")
+              .update({ acesso: "Liberado", motivo: null })
+              .eq("id", finalUserMat);
           }
         }
         if (finalUserEmail) {
@@ -950,7 +1003,7 @@ export default function App() {
             console.error("Erro ao desbloquear usuário por e-mail:", errByEmail);
           }
         }
-        if (!finalUserId && !finalUserEmail && rawUserName) {
+        if (!finalUserMat && !finalUserEmail && rawUserName) {
           const { error: errByName } = await supabase
             .from("usuarios")
             .update({ acesso: "Liberado", motivo: null })
@@ -962,9 +1015,9 @@ export default function App() {
 
         setAllUsers(prev => prev.map(u => {
           if (
-            (finalUserId && u.id === finalUserId) ||
+            (finalUserMat && (u.matricula === finalUserMat || u.id === finalUserMat)) ||
             (finalUserEmail && u.email?.toLowerCase().trim() === finalUserEmail) ||
-            (!finalUserId && !finalUserEmail && rawUserName && (u.nome || u.name || "").toLowerCase().trim() === rawUserName.toLowerCase())
+            (!finalUserMat && !finalUserEmail && rawUserName && (u.nome || u.name || "").toLowerCase().trim() === rawUserName.toLowerCase())
           ) {
             return { ...u, acesso: "Liberado", status: "Liberado", status_da_conta: "Liberado", motivo: null };
           }
@@ -1029,27 +1082,38 @@ export default function App() {
 
   // Alterar bloqueio/liberação do aluno a partir da Central de Atendimento
   const handleToggleUserBlockFromTicket = async (targetIdOrEmail: string, newStatus: "Liberado" | "Bloqueado", motivo: string = "") => {
+    const isEmail = targetIdOrEmail.includes("@");
     const isUUID = isValidUUID(targetIdOrEmail);
     try {
       if (supabase) {
-        if (isUUID) {
-          const { error } = await supabase.from("usuarios").update({
-            acesso: newStatus,
-            motivo: newStatus === "Bloqueado" ? (motivo || "Bloqueado administrativamente.") : null
-          }).eq("id", targetIdOrEmail);
-          if (error) throw error;
-        } else {
+        if (isEmail) {
           const { error } = await supabase.from("usuarios").update({
             acesso: newStatus,
             motivo: newStatus === "Bloqueado" ? (motivo || "Bloqueado administrativamente.") : null
           }).eq("email", targetIdOrEmail.toLowerCase().trim());
           if (error) throw error;
+        } else {
+          const { error: matErr } = await supabase.from("usuarios").update({
+            acesso: newStatus,
+            motivo: newStatus === "Bloqueado" ? (motivo || "Bloqueado administrativamente.") : null
+          }).eq("matricula", targetIdOrEmail.trim());
+          if (matErr && isUUID) {
+            const { error: idErr } = await supabase.from("usuarios").update({
+              acesso: newStatus,
+              motivo: newStatus === "Bloqueado" ? (motivo || "Bloqueado administrativamente.") : null
+            }).eq("id", targetIdOrEmail.trim());
+            if (idErr) throw idErr;
+          }
         }
       }
 
       setAllUsers((prev) =>
         prev.map((u) => {
-          if ((isUUID && u.id === targetIdOrEmail) || (u.email && u.email.toLowerCase() === targetIdOrEmail.toLowerCase())) {
+          if (
+            u.matricula === targetIdOrEmail ||
+            u.id === targetIdOrEmail ||
+            (u.email && u.email.toLowerCase() === targetIdOrEmail.toLowerCase())
+          ) {
             return {
               ...u,
               acesso: newStatus,
@@ -1241,13 +1305,15 @@ export default function App() {
           return;
         }
 
-        let query = supabase.from("projeto_progresso").select("id, id_do_projeto, status, id_epc").eq("id_do_projeto", projData.id);
-        if (user?.id) {
-          query = query.eq("id_do_usuario", user.id);
+        const projId = projData?.id;
+        const userMat = (user as any)?.matricula || (user?.id ? extractMatricula(user.id, allUsers) : "");
+        let query = supabase.from("projeto_progresso").select("id, id_do_projeto, status, id_epc").eq("id_do_projeto", projId);
+        if (userMat) {
+          query = query.eq("matricula_usuario", userMat);
         }
         let { data: progData, error: pErr } = await query.limit(1).maybeSingle();
-        if (pErr) {
-          let fbQuery = supabase.from("projetos_progresso").select("id, id_do_projeto, status, id_epc").eq("id_do_projeto", projData.id);
+        if (pErr || !progData) {
+          let fbQuery = supabase.from("projeto_progresso").select("id, id_do_projeto, status, id_epc").eq("id_do_projeto", projId);
           if (user?.id) fbQuery = fbQuery.eq("id_do_usuario", user.id);
           const fb = await fbQuery.limit(1).maybeSingle();
           progData = fb.data;
@@ -1510,6 +1576,10 @@ export default function App() {
     }
     if (clean === "usuarios" || clean === "users" || clean === "controle-usuarios") {
       setActiveTab("usuarios");
+      return;
+    }
+    if (clean === "documentos" || clean === "documento" || clean === "docs") {
+      setActiveTab("documentos");
       return;
     }
 
@@ -1787,15 +1857,16 @@ export default function App() {
         }
 
         const projId = projData?.id || courseId;
+        const userMat = (user as any)?.matricula || (userId && userId !== "guest" ? extractMatricula(userId, allUsers) : "guest");
 
-        // 2. Check if row exists in 'projeto_progresso' / 'projetos_progresso'
+        // 2. Check if row exists in 'projeto_progresso'
         let query = supabase.from("projeto_progresso").select("id, status, id_epc").eq("id_do_projeto", projId);
-        if (userId && userId !== "guest") {
-          query = query.eq("id_do_usuario", userId);
+        if (userMat && userMat !== "guest") {
+          query = query.eq("matricula_usuario", userMat);
         }
         let { data: existingProg, error: pErr } = await query.limit(1).maybeSingle();
-        if (pErr) {
-          let fbQuery = supabase.from("projetos_progresso").select("id, status, id_epc").eq("id_do_projeto", projId);
+        if (pErr || !existingProg) {
+          let fbQuery = supabase.from("projeto_progresso").select("id, status, id_epc").eq("id_do_projeto", projId);
           if (userId && userId !== "guest") fbQuery = fbQuery.eq("id_do_usuario", userId);
           const fb = await fbQuery.limit(1).maybeSingle();
           existingProg = fb.data;
@@ -1807,13 +1878,13 @@ export default function App() {
             .from("projeto_progresso")
             .update({
               status: newStatus,
-              id_do_usuario: userId
+              matricula_usuario: userMat
             })
             .eq("id", existingProg.id);
 
           if (uErr) {
             await supabase
-              .from("projetos_progresso")
+              .from("projeto_progresso")
               .update({
                 status: newStatus,
                 id_do_usuario: userId
@@ -1831,13 +1902,13 @@ export default function App() {
             .from("projeto_progresso")
             .insert({
               id_do_projeto: projId,
-              id_do_usuario: userId,
+              matricula_usuario: userMat,
               status: "Em andamento"
             });
 
           if (iErr) {
             await supabase
-              .from("projetos_progresso")
+              .from("projeto_progresso")
               .insert({
                 id_do_projeto: projId,
                 id_do_usuario: userId,
@@ -1899,16 +1970,17 @@ export default function App() {
 
         const projId = projData?.id || courseId;
         const userId = user?.id || "guest";
+        const userMat = (user as any)?.matricula || (user?.id ? extractMatricula(user.id, allUsers) : "guest");
         const epcVal = projectIdInput.trim();
 
-        // 2. Check if row exists in 'projeto_progresso' / 'projetos_progresso'
+        // 2. Check if row exists in 'projeto_progresso'
         let query = supabase.from("projeto_progresso").select("id").eq("id_do_projeto", projId);
-        if (user?.id) {
-          query = query.eq("id_do_usuario", user.id);
+        if (userMat && userMat !== "guest") {
+          query = query.eq("matricula_usuario", userMat);
         }
         let { data: existingProg, error: pErr } = await query.limit(1).maybeSingle();
-        if (pErr) {
-          let fbQuery = supabase.from("projetos_progresso").select("id").eq("id_do_projeto", projId);
+        if (pErr || !existingProg) {
+          let fbQuery = supabase.from("projeto_progresso").select("id").eq("id_do_projeto", projId);
           if (user?.id) fbQuery = fbQuery.eq("id_do_usuario", user.id);
           const fb = await fbQuery.limit(1).maybeSingle();
           existingProg = fb.data;
@@ -1920,13 +1992,13 @@ export default function App() {
             .update({
               id_epc: epcVal,
               status: "Finalizado",
-              id_do_usuario: userId
+              matricula_usuario: userMat
             })
             .eq("id", existingProg.id);
 
           if (uErr) {
             await supabase
-              .from("projetos_progresso")
+              .from("projeto_progresso")
               .update({
                 id_epc: epcVal,
                 status: "Finalizado",
@@ -1939,14 +2011,14 @@ export default function App() {
             .from("projeto_progresso")
             .insert({
               id_do_projeto: projId,
-              id_do_usuario: userId,
+              matricula_usuario: userMat,
               id_epc: epcVal,
               status: "Finalizado"
             });
 
           if (iErr) {
             await supabase
-              .from("projetos_progresso")
+              .from("projeto_progresso")
               .insert({
                 id_do_projeto: projId,
                 id_do_usuario: userId,
@@ -2027,15 +2099,29 @@ export default function App() {
       // 1. Get user profile from 'usuarios' table
       let userRow: any = null;
       if (targetUser) {
-        const { data: usuarioById } = await supabase
-          .from("usuarios")
-          .select("*")
-          .eq("id", targetUser.id)
-          .maybeSingle();
+        const targetKey = targetUser.matricula || targetUser.id || "";
+        if (targetKey) {
+          const { data: usuarioByMat } = await supabase
+            .from("usuarios")
+            .select("*")
+            .eq("matricula", targetKey)
+            .maybeSingle();
 
-        if (usuarioById) {
-          userRow = usuarioById;
-        } else if (targetUser.email) {
+          if (usuarioByMat) {
+            userRow = usuarioByMat;
+          } else {
+            const { data: usuarioById } = await supabase
+              .from("usuarios")
+              .select("*")
+              .eq("id", targetKey)
+              .maybeSingle();
+            if (usuarioById) {
+              userRow = usuarioById;
+            }
+          }
+        }
+
+        if (!userRow && targetUser.email) {
           const { data: usuarioByEmail } = await supabase
             .from("usuarios")
             .select("*")
@@ -2043,18 +2129,7 @@ export default function App() {
             .maybeSingle();
 
           if (usuarioByEmail) {
-            const { data: updatedU, error: updateErr } = await supabase
-              .from("usuarios")
-              .update({ id: targetUser.id })
-              .eq("id", usuarioByEmail.id)
-              .select()
-              .maybeSingle();
-
-            if (!updateErr && updatedU) {
-              userRow = updatedU;
-            } else {
-              userRow = usuarioByEmail;
-            }
+            userRow = usuarioByEmail;
           }
         }
       }
@@ -2062,12 +2137,22 @@ export default function App() {
       // Fallback check on 'perfis'
       let legacyProfile: any = null;
       if (!userRow && targetUser) {
-        const { data: pById } = await supabase
+        const targetKey = targetUser.matricula || targetUser.id || "";
+        const { data: pByMat } = await supabase
           .from("perfis")
           .select("*")
-          .eq("id", targetUser.id)
+          .eq("matricula_usuario", targetKey)
           .maybeSingle();
-        legacyProfile = pById;
+        if (pByMat) {
+          legacyProfile = pByMat;
+        } else {
+          const { data: pById } = await supabase
+            .from("perfis")
+            .select("*")
+            .eq("id", targetKey)
+            .maybeSingle();
+          legacyProfile = pById;
+        }
       }
 
       const isAccountBlocked = userRow && (
@@ -2083,8 +2168,10 @@ export default function App() {
         localStorage.removeItem("aluradev_custom_user");
         localStorage.removeItem("aluradev_saved_guest");
         const motivoTexto = userRow.motivo || "Acesso temporariamente bloqueado pela administração.";
+        const resolvedMat = extractMatricula(userRow.matricula || userRow.id || targetUser?.id || "");
         setBlockedAccountInfo({
-          id: userRow.id || targetUser?.id,
+          id: userRow.matricula || userRow.id || targetUser?.id,
+          matricula: resolvedMat,
           email: targetUser?.email || userRow.email,
           name: userRow.nome,
           motivo: motivoTexto
@@ -2134,33 +2221,53 @@ export default function App() {
 
         // Fetch completed progress
         if (targetUser) {
+          const userMat = extractMatricula(userRow?.matricula || userRow?.id || targetUser.matricula || targetUser.id || "");
           const { data: cProgresso } = await supabase
             .from("progresso")
             .select("*")
-            .eq("id_do_usuario", targetUser.id);
+            .or(`matricula_usuario.eq.${userMat},id_do_usuario.eq.${targetUser.id}`);
 
           let cLessons: any[] = [];
-          const { data: cAulasData } = await supabase
+          const { data: cAulasByMat } = await supabase
             .from("aulas_concluidas")
             .select("*")
-            .eq("id_do_usuario", targetUser.id);
+            .eq("matricula_usuario", userMat);
 
-          if (cAulasData && cAulasData.length > 0) {
-            cLessons = cAulasData;
+          if (cAulasByMat && cAulasByMat.length > 0) {
+            cLessons = cAulasByMat;
           } else {
-            const { data: cAtivData } = await supabase
-              .from("atividades_concluidas")
+            const { data: cAulasData } = await supabase
+              .from("aulas_concluidas")
               .select("*")
               .eq("id_do_usuario", targetUser.id);
-            if (cAtivData && cAtivData.length > 0) {
-              cLessons = cAtivData;
+
+            if (cAulasData && cAulasData.length > 0) {
+              cLessons = cAulasData;
+            } else {
+              const { data: cAtivData } = await supabase
+                .from("atividades_concluidas")
+                .select("*")
+                .eq("id_do_usuario", targetUser.id);
+              if (cAtivData && cAtivData.length > 0) {
+                cLessons = cAtivData;
+              }
             }
           }
 
-          const { data: cCourses } = await supabase
+          let cCourses: any[] = [];
+          const { data: cCoursesByMat } = await supabase
             .from("cursos_concluidos")
             .select("*")
-            .eq("id_do_usuario", targetUser.id);
+            .eq("matricula_usuario", userMat);
+          if (cCoursesByMat && cCoursesByMat.length > 0) {
+            cCourses = cCoursesByMat;
+          } else {
+            const { data: cCoursesById } = await supabase
+              .from("cursos_concluidos")
+              .select("*")
+              .eq("id_do_usuario", targetUser.id);
+            if (cCoursesById) cCourses = cCoursesById;
+          }
 
           let completedLessonsKeys: string[] = [];
           if (cLessons && cLessons.length > 0) {
@@ -2218,11 +2325,12 @@ export default function App() {
       if (targetUser && studentNameVal) {
         const mappedRole = authRoleSelected === "administrador" ? "Admin" : authRoleSelected === "instrutor" ? "Instrutor" : "Aluno";
         const roleVal = userRow?.papel || legacyProfile?.account_type || legacyProfile?.cargo || mappedRole;
+        const userMat = extractMatricula(userRow?.matricula || userRow?.id || targetUser.matricula || targetUser.id || "");
 
         try {
           if (!userRow) {
             const createPayload: any = {
-              id: targetUser.id,
+              matricula: userMat,
               nome: studentNameVal,
               email: targetUser.email?.trim().toLowerCase() || "",
               papel: roleVal,
@@ -2233,7 +2341,10 @@ export default function App() {
             if (authPassword && authPassword.trim()) {
               createPayload.senha = scramblePassword(authPassword.trim());
             }
-            await supabase.from("usuarios").upsert(createPayload, { onConflict: "id" });
+            const { error: uErr } = await supabase.from("usuarios").upsert(createPayload, { onConflict: "matricula" });
+            if (uErr) {
+              await supabase.from("usuarios").upsert({ ...createPayload, id: targetUser.id }, { onConflict: "id" });
+            }
           } else {
             // Se já existe mas porventura o acesso veio null ou vazio, garante como 'Liberado'
             const updates: any = {};
@@ -2244,17 +2355,29 @@ export default function App() {
               updates.senha = scramblePassword(authPassword.trim());
             }
             if (Object.keys(updates).length > 0) {
-              await supabase.from("usuarios").update(updates).eq("id", userRow.id);
+              if (userRow.matricula) {
+                await supabase.from("usuarios").update(updates).eq("matricula", userRow.matricula);
+              } else {
+                await supabase.from("usuarios").update(updates).eq("id", userRow.id);
+              }
             }
           }
 
           if (roleVal.toString().toLowerCase().includes("admin") || roleVal.toString().toLowerCase().includes("instru")) {
-            await supabase.from("perfis").upsert({
-              id: targetUser.id,
+            const { error: pErr } = await supabase.from("perfis").upsert({
+              matricula_usuario: userMat,
               name: studentNameVal,
               cargo: roleVal,
               account_type: roleVal.toString().toLowerCase().includes("admin") ? "administrador" : "instrutor"
-            }, { onConflict: "id" });
+            }, { onConflict: "matricula_usuario" });
+            if (pErr) {
+              await supabase.from("perfis").upsert({
+                id: targetUser.id,
+                name: studentNameVal,
+                cargo: roleVal,
+                account_type: roleVal.toString().toLowerCase().includes("admin") ? "administrador" : "instrutor"
+              }, { onConflict: "id" });
+            }
           }
         } catch (e) {
           console.error("Erro ao sincronizar usuário na tabela usuarios:", e);
@@ -2266,31 +2389,43 @@ export default function App() {
       let fetchedUsers: any[] = [];
 
       if (dbUsuarios && dbUsuarios.length > 0) {
-        fetchedUsers = dbUsuarios.map(u => ({
-          id: u.id,
-          name: u.nome || "Estudante",
-          email: u.email || `${(u.nome || 'estudante').toLowerCase().replace(/\s/g, '')}@gmail.com`,
-          senha: u.senha || "",
-          password: u.senha || "",
-          account_type: (u.papel || u.tipo_de_conta || "").toLowerCase().includes("admin") ? "administrador" : (u.papel || u.tipo_de_conta || "").toLowerCase().includes("instru") ? "instrutor" : "estudante",
-          acesso: (u.acesso === "Bloqueado" || u.status_da_conta === "Bloqueado" || u.status === "Bloqueado") ? "Bloqueado" : "Liberado",
-          status: (u.acesso === "Bloqueado" || u.status_da_conta === "Bloqueado" || u.status === "Bloqueado") ? "Bloqueado" : "Liberado",
-          motivo: u.motivo || "",
-          created_at: u.data_do_cadastro ? String(u.data_do_cadastro).split("T")[0] : "2026-07-23"
-        }));
+        fetchedUsers = dbUsuarios.map(u => {
+          const rawKey = String(u.matricula || u.id || "");
+          const mat = extractMatricula(rawKey);
+          return {
+            id: rawKey || mat,
+            matricula: mat,
+            name: u.nome || "Estudante",
+            nome: u.nome || "Estudante",
+            email: u.email || `${(u.nome || 'estudante').toLowerCase().replace(/\s/g, '')}@gmail.com`,
+            senha: u.senha || "",
+            password: u.senha || "",
+            account_type: (u.papel || u.tipo_de_conta || "").toLowerCase().includes("admin") ? "administrador" : (u.papel || u.tipo_de_conta || "").toLowerCase().includes("instru") ? "instrutor" : "estudante",
+            acesso: (u.acesso === "Bloqueado" || u.status_da_conta === "Bloqueado" || u.status === "Bloqueado") ? "Bloqueado" : "Liberado",
+            status: (u.acesso === "Bloqueado" || u.status_da_conta === "Bloqueado" || u.status === "Bloqueado") ? "Bloqueado" : "Liberado",
+            motivo: u.motivo || "",
+            created_at: u.data_do_cadastro ? String(u.data_do_cadastro).split("T")[0] : "2026-07-23"
+          };
+        });
       } else {
         const { data: dbProfiles } = await supabase.from("perfis").select("*");
         if (dbProfiles && dbProfiles.length > 0) {
-          fetchedUsers = dbProfiles.map(p => ({
-            id: p.id,
-            name: p.name || "Estudante",
-            email: targetUser && p.id === targetUser.id ? targetUser.email : `${(p.name || 'estudante').toLowerCase().replace(/\s/g, '')}@gmail.com`,
-            account_type: (p.account_type || p.cargo || "").toLowerCase().includes("admin") ? "administrador" : (p.account_type || p.cargo || "").toLowerCase().includes("instru") ? "instrutor" : "estudante",
-            acesso: "Liberado",
-            status: "Liberado",
-            motivo: "",
-            created_at: p.last_study_date || "2026-07-14"
-          }));
+          fetchedUsers = dbProfiles.map(p => {
+            const rawKey = String(p.matricula_usuario || p.id || "");
+            const mat = extractMatricula(rawKey);
+            return {
+              id: rawKey || mat,
+              matricula: mat,
+              name: p.name || "Estudante",
+              nome: p.name || "Estudante",
+              email: targetUser && (rawKey === targetUser.id || mat === extractMatricula(targetUser.id || "")) ? targetUser.email : `${(p.name || 'estudante').toLowerCase().replace(/\s/g, '')}@gmail.com`,
+              account_type: (p.account_type || p.cargo || "").toLowerCase().includes("admin") ? "administrador" : (p.account_type || p.cargo || "").toLowerCase().includes("instru") ? "instrutor" : "estudante",
+              acesso: "Liberado",
+              status: "Liberado",
+              motivo: "",
+              created_at: p.last_study_date || "2026-07-14"
+            };
+          });
         }
       }
 
@@ -2298,7 +2433,7 @@ export default function App() {
 
       if (targetUser && fetchedUsers.length > 0) {
         const currentInFetched = fetchedUsers.find(
-          u => (u.id === targetUser.id || (targetUser.email && u.email && u.email.toLowerCase() === targetUser.email.toLowerCase()))
+          u => (u.id === targetUser.id || u.matricula === targetUser.id || (targetUser.email && u.email && u.email.toLowerCase() === targetUser.email.toLowerCase()))
         );
         if (currentInFetched && (currentInFetched.acesso === "Bloqueado" || currentInFetched.status === "Bloqueado")) {
           await supabase.auth.signOut().catch(() => {});
@@ -2308,6 +2443,7 @@ export default function App() {
           localStorage.removeItem("aluradev_saved_guest");
           setBlockedAccountInfo({
             id: currentInFetched.id || targetUser.id,
+            matricula: currentInFetched.matricula || extractMatricula(currentInFetched.id || targetUser.id || ""),
             email: currentInFetched.email,
             name: currentInFetched.name,
             motivo: currentInFetched.motivo || "Acesso temporariamente bloqueado pela administração."
@@ -2586,24 +2722,43 @@ export default function App() {
     }
 
     if (user && supabase) {
+      const userMat = extractMatricula((user as any)?.matricula || user.id || "", allUsers);
       try {
-        await supabase
+        const { error: uErr } = await supabase
           .from("usuarios")
           .update({
             nome: newStats.name
           })
-          .eq("id", user.id);
+          .eq("matricula", userMat);
+        if (uErr) {
+          await supabase
+            .from("usuarios")
+            .update({
+              nome: newStats.name
+            })
+            .eq("id", user.id);
+        }
       } catch {}
 
       try {
-        await supabase
+        const { error: pErr } = await supabase
           .from("perfis")
           .update({
             name: newStats.name,
             streak: newStats.streak,
             last_study_date: newStats.lastStudyDate,
           })
-          .eq("id", user.id);
+          .eq("matricula_usuario", userMat);
+        if (pErr) {
+          await supabase
+            .from("perfis")
+            .update({
+              name: newStats.name,
+              streak: newStats.streak,
+              last_study_date: newStats.lastStudyDate,
+            })
+            .eq("id", user.id);
+        }
       } catch (err) {
         console.error("Erro ao salvar progresso no Supabase:", err);
       }
@@ -2673,8 +2828,10 @@ export default function App() {
             localStorage.removeItem("aluradev_custom_user");
             localStorage.removeItem("aluradev_saved_guest");
             const motivo = userRecord.motivo || "Acesso temporariamente bloqueado pela administração.";
+            const recId = userRecord.matricula || userRecord.id;
             setBlockedAccountInfo({
-              id: userRecord.id,
+              id: recId,
+              matricula: extractMatricula(recId || ""),
               email: emailLower,
               name: userRecord.nome || "Usuário",
               motivo
@@ -2684,6 +2841,7 @@ export default function App() {
           }
 
           const storedPassword = userRecord.senha || userRecord.password;
+          const recordKey = userRecord.matricula || userRecord.id;
           if (storedPassword) {
             const isMatch = passwordsMatch(storedPassword, authPassword);
             if (!isMatch) {
@@ -2702,7 +2860,8 @@ export default function App() {
               loggedUser = nativeAuth.user;
             } else {
               loggedUser = {
-                id: userRecord.id,
+                id: recordKey,
+                matricula: extractMatricula(recordKey || ""),
                 email: emailLower,
                 user_metadata: {
                   nome: userRecord.nome || emailLower.split("@")[0],
@@ -2713,7 +2872,11 @@ export default function App() {
               // Migração silenciosa para formato seguro embaralhado caso ainda estivesse em texto limpo
               if (storedPassword === authPassword) {
                 try {
-                  await supabase.from("usuarios").update({ senha: scramblePassword(authPassword) }).eq("id", userRecord.id);
+                  if (userRecord.matricula) {
+                    await supabase.from("usuarios").update({ senha: scramblePassword(authPassword) }).eq("matricula", userRecord.matricula);
+                  } else {
+                    await supabase.from("usuarios").update({ senha: scramblePassword(authPassword) }).eq("id", userRecord.id);
+                  }
                 } catch (e) {}
               }
             }
@@ -2727,7 +2890,11 @@ export default function App() {
             if (nativeAuth?.user) {
               loggedUser = nativeAuth.user;
               try {
-                await supabase.from("usuarios").update({ senha: scramblePassword(authPassword) }).eq("id", userRecord.id);
+                if (userRecord.matricula) {
+                  await supabase.from("usuarios").update({ senha: scramblePassword(authPassword) }).eq("matricula", userRecord.matricula);
+                } else {
+                  await supabase.from("usuarios").update({ senha: scramblePassword(authPassword) }).eq("id", userRecord.id);
+                }
               } catch (e) {}
             } else {
               setLoginEmailNotRegistered(false);
@@ -2745,12 +2912,23 @@ export default function App() {
           return;
         }
 
-        // Secondary check on loggedUser id to be 100% sure it is not blocked
-        const { data: postAuthCheck } = await supabase
+        // Secondary check on loggedUser matricula/id to be 100% sure it is not blocked
+        let postAuthCheck: any = null;
+        const { data: checkByMat } = await supabase
           .from("usuarios")
           .select("*")
-          .eq("id", loggedUser.id)
+          .eq("matricula", loggedUser.matricula || loggedUser.id)
           .maybeSingle();
+        if (checkByMat) {
+          postAuthCheck = checkByMat;
+        } else {
+          const { data: checkById } = await supabase
+            .from("usuarios")
+            .select("*")
+            .eq("id", loggedUser.id)
+            .maybeSingle();
+          postAuthCheck = checkById;
+        }
 
         if (postAuthCheck && (postAuthCheck.acesso === "Bloqueado" || postAuthCheck.status === "Bloqueado" || postAuthCheck.status_da_conta === "Bloqueado")) {
           await supabase.auth.signOut().catch(() => {});
@@ -2759,8 +2937,10 @@ export default function App() {
           localStorage.removeItem("aluradev_custom_user");
           localStorage.removeItem("aluradev_saved_guest");
           const motivo = postAuthCheck.motivo || "Acesso temporariamente bloqueado pela administração.";
+          const pKey = postAuthCheck.matricula || postAuthCheck.id || loggedUser.id;
           setBlockedAccountInfo({
-            id: postAuthCheck.id || loggedUser.id,
+            id: pKey,
+            matricula: extractMatricula(pKey || ""),
             email: emailLower,
             name: postAuthCheck.nome || loggedUser.user_metadata?.nome || "Usuário",
             motivo
@@ -2794,27 +2974,48 @@ export default function App() {
         setAccountType("administrador");
 
         try {
-          await supabase.from("usuarios").upsert({
-            id: loggedUser.id,
+          const userMat = extractMatricula(dbUserCheck?.matricula || postAuthCheck?.matricula || loggedUser.matricula || loggedUser.id || "");
+          const { error: upErr } = await supabase.from("usuarios").upsert({
+            matricula: userMat,
             nome: nameToUse,
             email: emailLower,
             papel: mappedRole,
             senha: scramblePassword(authPassword),
             acesso: existingAcesso,
             motivo: existingMotivo
-          }, { onConflict: "id" });
+          }, { onConflict: "matricula" });
+
+          if (upErr) {
+            await supabase.from("usuarios").upsert({
+              id: loggedUser.id,
+              nome: nameToUse,
+              email: emailLower,
+              papel: mappedRole,
+              senha: scramblePassword(authPassword),
+              acesso: existingAcesso,
+              motivo: existingMotivo
+            }, { onConflict: "id" });
+          }
 
           await supabase.from("usuarios").update({
             senha: scramblePassword(authPassword),
             acesso: existingAcesso
           }).eq("email", emailLower);
 
-          await supabase.from("perfis").upsert({
-            id: loggedUser.id,
+          const { error: pErr } = await supabase.from("perfis").upsert({
+            matricula_usuario: userMat,
             name: nameToUse,
             cargo: mappedRole,
             account_type: "administrador"
-          }, { onConflict: "id" });
+          }, { onConflict: "matricula_usuario" });
+          if (pErr) {
+            await supabase.from("perfis").upsert({
+              id: loggedUser.id,
+              name: nameToUse,
+              cargo: mappedRole,
+              account_type: "administrador"
+            }, { onConflict: "id" });
+          }
         } catch (err) {
           console.error("Erro ao sincronizar usuario na tabela usuarios:", err);
         }
@@ -2847,7 +3048,7 @@ export default function App() {
         // Check if email already exists in 'usuarios' table
         const { data: dbExistingUser } = await supabase
           .from("usuarios")
-          .select("id, email")
+          .select("*")
           .eq("email", emailLower)
           .maybeSingle();
 
@@ -2856,9 +3057,8 @@ export default function App() {
         }
 
         // Try native auth signup in background, proceed cleanly regardless of rate-limits
-        let createdUserId: string | null = null;
         try {
-          const { data: signUpData } = await supabase.auth.signUp({
+          await supabase.auth.signUp({
             email: emailLower,
             password: authPassword,
             options: {
@@ -2869,21 +3069,16 @@ export default function App() {
               }
             }
           });
-          if (signUpData?.user?.id) {
-            createdUserId = signUpData.user.id;
-          }
         } catch (e) {
           console.warn("Notice: native auth sign up note:", e);
         }
 
-        if (!createdUserId) {
-          createdUserId = generateUniqueUserUUID(allUsers);
-        }
+        const createdMatricula = generateMatricula(allUsers);
 
-        // Register directly in 'usuarios' table with exact columns: id, nome, email, senha, papel, data_do_cadastro, acesso, motivo
+        // Register directly in 'usuarios' table with exact columns: matricula, nome, email, senha, papel, data_do_cadastro, acesso, motivo
         try {
           const userPayload = {
-            id: createdUserId,
+            matricula: createdMatricula,
             nome: nameToUse,
             email: emailLower,
             senha: scrambledPass,
@@ -2893,31 +3088,37 @@ export default function App() {
             data_do_cadastro: new Date().toISOString()
           };
 
-          const { error: upsertErr } = await supabase.from("usuarios").upsert(userPayload, { onConflict: "id" });
+          const { error: upsertErr } = await supabase.from("usuarios").upsert(userPayload, { onConflict: "matricula" });
           if (upsertErr) {
-            console.warn("Notice: upsert error on id:", upsertErr);
+            await supabase.from("usuarios").upsert({ ...userPayload, id: createdMatricula }, { onConflict: "id" });
           }
 
           // Also guarantee update by email in case a database trigger had created the row without senha and acesso
-          const { error: updateErr } = await supabase.from("usuarios").update({
+          await supabase.from("usuarios").update({
             nome: nameToUse,
             senha: scrambledPass,
             papel: mappedRole,
             acesso: "Liberado",
             motivo: null
           }).eq("email", emailLower);
-          if (updateErr) {
-            console.warn("Notice: update error on email:", updateErr);
-          }
 
           if (authRoleSelected === "administrador" || authRoleSelected === "instrutor") {
-            await supabase.from("perfis").upsert({
-              id: createdUserId,
+            const { error: pErr } = await supabase.from("perfis").upsert({
+              matricula_usuario: createdMatricula,
               name: nameToUse,
               email: emailLower,
               cargo: mappedRole,
               account_type: authRoleSelected
-            }, { onConflict: "id" });
+            }, { onConflict: "matricula_usuario" });
+            if (pErr) {
+              await supabase.from("perfis").upsert({
+                id: createdMatricula,
+                name: nameToUse,
+                email: emailLower,
+                cargo: mappedRole,
+                account_type: authRoleSelected
+              }, { onConflict: "id" });
+            }
           }
         } catch (e) {
           console.error("Erro ao sincronizar dados do usuário nas tabelas:", e);
@@ -2929,7 +3130,8 @@ export default function App() {
           const cachedList = cachedRaw ? JSON.parse(cachedRaw) : [];
           const updatedCreated = [
             {
-              id: createdUserId,
+              id: createdMatricula,
+              matricula: createdMatricula,
               nome: nameToUse,
               email: emailLower,
               papel: mappedRole,
@@ -3035,9 +3237,9 @@ export default function App() {
     // 1. Consulta na tabela 'usuarios' do Supabase
     if (supabase) {
       try {
-        const { data, error } = await supabase
+        const { data } = await supabase
           .from("usuarios")
-          .select("id, email")
+          .select("*")
           .eq("email", clean)
           .maybeSingle();
         if (data && data.email) return true;
@@ -3304,13 +3506,22 @@ export default function App() {
       // 2. Exclusão de TODOS os dados do usuário nas tabelas do Supabase
       if (supabase) {
         try {
+          const userMat = extractMatricula((user as any)?.matricula || user?.id || "", allUsers);
+          if (userMat) {
+            await supabase.from("aulas_concluidas").delete().eq("matricula_usuario", userMat);
+            await supabase.from("cursos_concluidos").delete().eq("matricula_usuario", userMat);
+            await supabase.from("projeto_progresso").delete().eq("matricula_usuario", userMat);
+          }
           if (user?.id) {
             await supabase.from("aulas_concluidas").delete().eq("id_do_usuario", user.id);
             await supabase.from("atividades_concluidas").delete().eq("id_do_usuario", user.id);
             await supabase.from("cursos_concluidos").delete().eq("id_do_usuario", user.id);
           }
-          await supabase.from("usuarios").delete().or(`email.ilike.${emailToUse}${user?.id ? `,id.eq.${user.id}` : ""}`);
-          await supabase.from("perfis").delete().or(`email.ilike.${emailToUse}${user?.id ? `,id.eq.${user.id}` : ""}`);
+          await supabase.from("usuarios").delete().eq("email", emailToUse);
+          if (userMat) {
+            await supabase.from("usuarios").delete().eq("matricula", userMat);
+            await supabase.from("perfis").delete().eq("matricula_usuario", userMat);
+          }
           await supabase.auth.signOut().catch(() => {});
         } catch (dbErr) {
           console.warn("Aviso ao limpar dados no Supabase:", dbErr);
@@ -3400,23 +3611,29 @@ export default function App() {
   };
 
   const handleUpdateUserRole = async (userId: string, newRole: "estudante" | "instrutor" | "administrador") => {
-    setAllUsers(prev => prev.map(u => u.id === userId ? { ...u, account_type: newRole } : u));
+    setAllUsers(prev => prev.map(u => (u.id === userId || u.matricula === userId) ? { ...u, account_type: newRole } : u));
 
     if (supabase) {
       const dbRole = newRole === "administrador" ? "Admin" : newRole === "instrutor" ? "Instrutor" : "Aluno";
       try {
-        await supabase
+        const { error: uErr } = await supabase
           .from("usuarios")
           .update({ papel: dbRole })
-          .eq("id", userId);
+          .eq("matricula", userId);
+        if (uErr) {
+          await supabase.from("usuarios").update({ papel: dbRole }).eq("id", userId);
+        }
       } catch (err) {
         console.error("Erro ao atualizar papel do usuário em usuarios:", err);
       }
       try {
-        await supabase
+        const { error: pErr } = await supabase
           .from("perfis")
           .update({ cargo: dbRole, account_type: newRole })
-          .eq("id", userId);
+          .eq("matricula_usuario", userId);
+        if (pErr) {
+          await supabase.from("perfis").update({ cargo: dbRole, account_type: newRole }).eq("id", userId);
+        }
       } catch (err) {
         console.error("Erro ao atualizar papel do usuário em perfis:", err);
       }
@@ -3425,7 +3642,7 @@ export default function App() {
 
   const handleRemoveUser = async (userId: string) => {
     setAllUsers(prev => {
-      const updated = prev.filter(u => u.id !== userId);
+      const updated = prev.filter(u => u.id !== userId && u.matricula !== userId);
       try {
         localStorage.setItem("aluradev_all_users", JSON.stringify(updated));
       } catch (err) {}
@@ -3434,12 +3651,14 @@ export default function App() {
 
     if (supabase) {
       try {
-        await supabase.from("usuarios").delete().eq("id", userId);
+        const { error: uErr } = await supabase.from("usuarios").delete().eq("matricula", userId);
+        if (uErr) await supabase.from("usuarios").delete().eq("id", userId);
       } catch (err) {
         console.error("Erro ao remover usuário em usuarios:", err);
       }
       try {
-        await supabase.from("perfis").delete().eq("id", userId);
+        const { error: pErr } = await supabase.from("perfis").delete().eq("matricula_usuario", userId);
+        if (pErr) await supabase.from("perfis").delete().eq("id", userId);
       } catch (err) {
         console.error("Erro ao remover usuário em perfis:", err);
       }
@@ -3467,13 +3686,14 @@ export default function App() {
 
     setIsDeletingUser(true);
     const targetId = userToDelete.id;
+    const targetMat = userToDelete.matricula || extractMatricula(targetId || "");
     const targetEmail = userToDelete.email?.toLowerCase();
     const targetName = userToDelete.name;
 
     try {
       // 1. Remove from allUsers state and localStorage
       setAllUsers(prev => {
-        const updated = prev.filter(u => u.id !== targetId && u.email?.toLowerCase() !== targetEmail);
+        const updated = prev.filter(u => u.id !== targetId && u.matricula !== targetMat && u.email?.toLowerCase() !== targetEmail);
         try {
           localStorage.setItem("aluradev_all_users", JSON.stringify(updated));
         } catch (err) {}
@@ -3483,19 +3703,26 @@ export default function App() {
       // 2. Supabase cascade deletions for all tables with user references
       if (supabase) {
         try {
-          await supabase.from("usuarios").delete().eq("id", targetId);
+          if (targetMat) await supabase.from("usuarios").delete().eq("matricula", targetMat);
+          if (targetEmail) await supabase.from("usuarios").delete().eq("email", targetEmail);
+          if (targetId) await supabase.from("usuarios").delete().eq("id", targetId);
         } catch (err) {
           console.error("Erro ao remover de usuarios:", err);
         }
         try {
-          await supabase.from("perfis").delete().eq("id", targetId);
+          if (targetMat) await supabase.from("perfis").delete().eq("matricula_usuario", targetMat);
+          if (targetId) await supabase.from("perfis").delete().eq("id", targetId);
         } catch (err) {
           console.error("Erro ao remover de perfis:", err);
         }
         try {
-          await supabase.from("projetos_progresso").delete().eq("user_id", targetId);
+          if (targetMat) {
+            await supabase.from("aulas_concluidas").delete().eq("matricula_usuario", targetMat);
+            await supabase.from("cursos_concluidos").delete().eq("matricula_usuario", targetMat);
+            await supabase.from("projeto_progresso").delete().eq("matricula_usuario", targetMat);
+          }
         } catch (err) {
-          console.error("Erro ao remover de projetos_progresso:", err);
+          console.error("Erro ao remover progressos por matricula_usuario:", err);
         }
       }
 
@@ -3545,11 +3772,7 @@ export default function App() {
           const { data: adminRow } = await supabase
             .from("usuarios")
             .select("senha")
-            .or(
-              user?.id && isValidUUID(user.id)
-                ? `id.eq.${user.id},email.eq.${(user.email || "").toLowerCase()}`
-                : `email.eq.${(user?.email || "").toLowerCase()}`
-            )
+            .eq("email", (user?.email || "").toLowerCase())
             .limit(1)
             .maybeSingle();
           if (adminRow?.senha) {
@@ -3574,7 +3797,7 @@ export default function App() {
         return;
       }
 
-      const newUserId = generateUniqueUserUUID(allUsers);
+      const newUserMatricula = generateMatricula(allUsers);
       const nowIso = new Date().toISOString();
       const todayDate = nowIso.split("T")[0];
       const scrambledUserPassword = scramblePassword(newUserPassword.trim());
@@ -3585,11 +3808,11 @@ export default function App() {
           ? "Instrutor"
           : "Aluno";
 
-      // Gravar diretamente na tabela usuarios do banco de dados (com acesso sempre Liberado)
+      // Gravar diretamente na tabela usuarios do banco de dados usando matricula como chave principal (com acesso sempre Liberado)
       if (supabase) {
-        const { error: dbErr } = await supabase.from("usuarios").upsert(
+        let { error: dbErr } = await supabase.from("usuarios").upsert(
           {
-            id: newUserId,
+            matricula: newUserMatricula,
             nome: newUserName.trim(),
             email: emailFormatted,
             papel: dbRole,
@@ -3598,8 +3821,25 @@ export default function App() {
             motivo: null,
             data_do_cadastro: nowIso
           },
-          { onConflict: "id" }
+          { onConflict: "matricula" }
         );
+
+        if (dbErr) {
+          const fb = await supabase.from("usuarios").upsert(
+            {
+              id: newUserMatricula,
+              nome: newUserName.trim(),
+              email: emailFormatted,
+              papel: dbRole,
+              senha: scrambledUserPassword,
+              acesso: "Liberado",
+              motivo: null,
+              data_do_cadastro: nowIso
+            },
+            { onConflict: "id" }
+          );
+          dbErr = fb.error;
+        }
 
         if (dbErr) {
           console.error("Erro ao criar usuário na tabela usuarios:", dbErr);
@@ -3612,16 +3852,28 @@ export default function App() {
 
         if (newUserRole === "administrador" || newUserRole === "instrutor") {
           try {
-            await supabase.from("perfis").upsert(
+            const { error: pErr } = await supabase.from("perfis").upsert(
               {
-                id: newUserId,
+                matricula_usuario: newUserMatricula,
                 name: newUserName.trim(),
                 email: emailFormatted,
                 account_type: newUserRole,
                 cargo: dbRole
               },
-              { onConflict: "id" }
+              { onConflict: "matricula_usuario" }
             );
+            if (pErr) {
+              await supabase.from("perfis").upsert(
+                {
+                  id: newUserMatricula,
+                  name: newUserName.trim(),
+                  email: emailFormatted,
+                  account_type: newUserRole,
+                  cargo: dbRole
+                },
+                { onConflict: "id" }
+              );
+            }
           } catch (err) {
             console.error("Erro ao criar perfil em perfis:", err);
           }
@@ -3629,7 +3881,8 @@ export default function App() {
       }
 
       const newUser = {
-        id: newUserId,
+        id: newUserMatricula,
+        matricula: newUserMatricula,
         name: newUserName.trim(),
         nome: newUserName.trim(),
         email: emailFormatted,
@@ -3709,15 +3962,17 @@ export default function App() {
       loading: !!supabase
     });
 
-    if (supabase && userItem.id) {
+    if (supabase && (userItem.matricula || userItem.id)) {
+      const targetMat = extractMatricula(userItem.matricula || userItem.id, allUsers);
       try {
-        const { data: ativData, count: ativCount } = await supabase
-          .from("atividades_concluidas")
+        let totalLessons = 0;
+        const { data: acMatData, count: acMatCount } = await supabase
+          .from("aulas_concluidas")
           .select("*", { count: "exact" })
-          .eq("id_do_usuario", userItem.id);
-        let totalLessons = ativCount ?? (ativData?.length || 0);
+          .eq("matricula_usuario", targetMat);
+        totalLessons = acMatCount ?? (acMatData?.length || 0);
 
-        if (totalLessons === 0) {
+        if (totalLessons === 0 && userItem.id) {
           const { data: acData, count: acCount } = await supabase
             .from("aulas_concluidas")
             .select("*", { count: "exact" })
@@ -3725,16 +3980,33 @@ export default function App() {
           totalLessons = acCount ?? (acData?.length || 0);
         }
 
-        const { data: cursosData, count: cursosCount } = await supabase
+        if (totalLessons === 0 && userItem.id) {
+          const { data: ativData, count: ativCount } = await supabase
+            .from("atividades_concluidas")
+            .select("*", { count: "exact" })
+            .eq("id_do_usuario", userItem.id);
+          totalLessons = ativCount ?? (ativData?.length || 0);
+        }
+
+        let totalCourses = 0;
+        const { data: ccMatData, count: ccMatCount } = await supabase
           .from("cursos_concluidos")
           .select("*", { count: "exact" })
-          .eq("id_do_usuario", userItem.id);
-        const totalCourses = cursosCount ?? (cursosData?.length || 0);
+          .eq("matricula_usuario", targetMat);
+        totalCourses = ccMatCount ?? (ccMatData?.length || 0);
+
+        if (totalCourses === 0 && userItem.id) {
+          const { data: cursosData, count: cursosCount } = await supabase
+            .from("cursos_concluidos")
+            .select("*", { count: "exact" })
+            .eq("id_do_usuario", userItem.id);
+          totalCourses = cursosCount ?? (cursosData?.length || 0);
+        }
 
         const { data: progData } = await supabase
           .from("progresso")
           .select("*")
-          .eq("id_do_usuario", userItem.id);
+          .or(`matricula_usuario.eq.${targetMat}${userItem.id ? `,id_do_usuario.eq.${userItem.id}` : ""}`);
         let totalTrilhas = 0;
         if (progData && progData.length > 0) {
           totalTrilhas = progData.filter((p: any) => p.trilha_concluida || p.status === "Concluído" || p.concluido).length;
@@ -3766,10 +4038,11 @@ export default function App() {
     }
 
     const emailFormatted = editUserEmail.trim().toLowerCase();
+    const targetMat = editingUser.matricula || extractMatricula(editingUser.id || "", allUsers);
 
     setAllUsers(prev => {
       return prev.map(u => {
-        if (u.id === editingUser.id) {
+        if (u.id === editingUser.id || (targetMat && u.matricula === targetMat)) {
           return {
             ...u,
             name: editUserName.trim(),
@@ -3799,17 +4072,28 @@ export default function App() {
         if (editUserPassword.trim()) {
           updatePayload.senha = scramblePassword(editUserPassword.trim());
         }
-        await supabase.from("usuarios").update(updatePayload).eq("id", editingUser.id);
+        const { error: uErr } = await supabase.from("usuarios").update(updatePayload).eq("matricula", targetMat || editingUser.id);
+        if (uErr) {
+          await supabase.from("usuarios").update(updatePayload).eq("id", editingUser.id);
+        }
       } catch (err) {
         console.error("Erro ao atualizar usuário em usuarios:", err);
       }
       try {
-        await supabase.from("perfis").update({
+        const { error: pErr } = await supabase.from("perfis").update({
           name: editUserName.trim(),
           email: emailFormatted,
           account_type: editUserRole,
           cargo: dbRole
-        }).eq("id", editingUser.id);
+        }).eq("matricula_usuario", targetMat || editingUser.id);
+        if (pErr) {
+          await supabase.from("perfis").update({
+            name: editUserName.trim(),
+            email: emailFormatted,
+            account_type: editUserRole,
+            cargo: dbRole
+          }).eq("id", editingUser.id);
+        }
       } catch (err) {
         console.error("Erro ao atualizar perfil em perfis:", err);
       }
@@ -4543,9 +4827,11 @@ export default function App() {
       // Sync course completion to Supabase
       if (user && supabase) {
         try {
+          const userMat = extractMatricula((user as any)?.matricula || user.id || "", allUsers);
           const numericCourseId = parseInt(course.id.replace("curso-db-", ""), 10);
           if (!isNaN(numericCourseId)) {
             await supabase.from("progresso").upsert({
+              matricula_usuario: userMat,
               id_do_usuario: user.id,
               id_do_curso: numericCourseId,
               total_de_aulas: 10,
@@ -4555,10 +4841,16 @@ export default function App() {
             });
           }
 
-          await supabase.from("cursos_concluidos").insert({
-            user_id: user.id,
-            course_id: course.id
+          const { error: ccErr } = await supabase.from("cursos_concluidos").insert({
+            matricula_usuario: userMat,
+            id_do_curso: isNaN(numericCourseId) ? course.id : numericCourseId
           });
+          if (ccErr) {
+            await supabase.from("cursos_concluidos").insert({
+              id_do_usuario: user.id,
+              id_do_curso: isNaN(numericCourseId) ? course.id : numericCourseId
+            });
+          }
         } catch (err) {
           console.error("Erro ao salvar curso concluído no Supabase:", err);
         }
@@ -4604,14 +4896,15 @@ export default function App() {
       // Sync lesson completion to Supabase
       if (user && supabase) {
         try {
+          const userMat = extractMatricula((user as any)?.matricula || user.id || "", allUsers);
           const numericCourseId = parseInt(String(courseId).replace("curso-db-", ""), 10) || 1;
           const currentCourseObj = courses.find(c => c.id === courseId) || selectedCourse;
           const lessonObj = currentCourseObj?.modules?.[modIdx]?.lessons?.[lesIdx] as any;
           const lessonDbId = lessonObj?.id ? parseInt(String(lessonObj.id), 10) : (numericCourseId * 1000 + modIdx * 100 + lesIdx + 1);
 
-          // Standard Supabase payload: id_do_usuario & id_da_aula
+          // Standard Supabase payload: matricula_usuario & id_da_aula
           const cleanPayload = {
-            id_do_usuario: user.id,
+            matricula_usuario: userMat,
             id_da_aula: lessonDbId
           };
 
@@ -4619,7 +4912,7 @@ export default function App() {
           const { data: existingAula } = await supabase
             .from("aulas_concluidas")
             .select("id")
-            .eq("id_do_usuario", user.id)
+            .eq("matricula_usuario", userMat)
             .eq("id_da_aula", lessonDbId)
             .limit(1)
             .maybeSingle();
@@ -4627,7 +4920,10 @@ export default function App() {
           if (!existingAula) {
             const { error: errorAulas } = await supabase.from("aulas_concluidas").insert(cleanPayload);
             if (errorAulas) {
-              await supabase.from("atividades_concluidas").insert(cleanPayload);
+              await supabase.from("aulas_concluidas").insert({
+                id_do_usuario: user.id,
+                id_da_aula: lessonDbId
+              });
             }
           }
         } catch (err) {
@@ -4868,10 +5164,13 @@ export default function App() {
       name: newName
     });
     if (user && supabase) {
+      const userMat = extractMatricula((user as any)?.matricula || user.id || "", allUsers);
       try {
-        await supabase.from("usuarios").update({ nome: newName }).eq("id", user.id);
+        const { error: uErr } = await supabase.from("usuarios").update({ nome: newName }).eq("matricula", userMat);
+        if (uErr) await supabase.from("usuarios").update({ nome: newName }).eq("id", user.id);
         if (accountType === "administrador" || accountType === "instrutor") {
-          await supabase.from("perfis").update({ name: newName }).eq("id", user.id);
+          const { error: pErr } = await supabase.from("perfis").update({ name: newName }).eq("matricula_usuario", userMat);
+          if (pErr) await supabase.from("perfis").update({ name: newName }).eq("id", user.id);
         }
         await supabase.auth.updateUser({
           data: { nome: newName, name: newName }
@@ -5041,6 +5340,7 @@ export default function App() {
           }
 
           // Atualiza na tabela 'usuarios'
+          const userMat = extractMatricula((user as any)?.matricula || user.id || "", allUsers);
           const dbUpdates: any = { nome: pendingProfileChanges.name };
           if (pendingProfileChanges.email !== currentEmail) {
             dbUpdates.email = pendingProfileChanges.email;
@@ -5048,13 +5348,22 @@ export default function App() {
           if (pendingProfileChanges.password) {
             dbUpdates.senha = scramblePassword(pendingProfileChanges.password);
           }
-          await supabase.from("usuarios").update(dbUpdates).eq("id", user.id);
+          const { error: uErr } = await supabase.from("usuarios").update(dbUpdates).eq("matricula", userMat);
+          if (uErr) {
+            await supabase.from("usuarios").update(dbUpdates).eq("id", user.id);
+          }
 
           if (accountType === "administrador" || accountType === "instrutor") {
-            await supabase.from("perfis").update({
+            const { error: pErr } = await supabase.from("perfis").update({
               name: pendingProfileChanges.name,
               ...(pendingProfileChanges.email !== currentEmail ? { email: pendingProfileChanges.email } : {})
-            }).eq("id", user.id);
+            }).eq("matricula_usuario", userMat);
+            if (pErr) {
+              await supabase.from("perfis").update({
+                name: pendingProfileChanges.name,
+                ...(pendingProfileChanges.email !== currentEmail ? { email: pendingProfileChanges.email } : {})
+              }).eq("id", user.id);
+            }
           }
         } catch (dbErr) {
           console.error("Erro ao sincronizar dados no Supabase:", dbErr);
@@ -5462,19 +5771,33 @@ export default function App() {
                           console.warn("Tabela suporte_ouvidoria (opcional):", dbErr);
                         }
 
-                        // Gravar EXCLUSIVAMENTE na tabela atendimentos do banco Supabase (NÃO salvar em localStorage)
+                        // Gravar EXCLUSIVAMENTE na tabela atendimentos do banco Supabase (usando matricula_usuario)
                         const clientAtend = getAtendimentoClient();
+                        const blockedMat = extractMatricula(blockedAccountInfo?.matricula || blockedAccountInfo?.id || "");
                         if (clientAtend) {
-                          const validUserId = isValidUUID(blockedAccountInfo?.id) ? blockedAccountInfo?.id : null;
-                          const { error: insertErr } = await clientAtend.from("atendimentos").insert({
+                          let { error: insertErr } = await clientAtend.from("atendimentos").insert({
                             id: protocolNumber,
-                            id_do_usuario: validUserId,
+                            matricula_usuario: blockedMat || null,
                             nome: blockedAccountInfo?.name || "Usuário",
+                            email: blockedAccountInfo?.email || "",
                             tipo: "Bloqueio de Conta",
                             mensagem: appealExplanation.trim(),
                             status: "Aguardando",
                             criado_em: new Date().toISOString()
                           });
+                          if (insertErr) {
+                            const validUserId = isValidUUID(blockedAccountInfo?.id) ? blockedAccountInfo?.id : null;
+                            const fb = await clientAtend.from("atendimentos").insert({
+                              id: protocolNumber,
+                              id_do_usuario: validUserId,
+                              nome: blockedAccountInfo?.name || "Usuário",
+                              tipo: "Bloqueio de Conta",
+                              mensagem: appealExplanation.trim(),
+                              status: "Aguardando",
+                              criado_em: new Date().toISOString()
+                            });
+                            insertErr = fb.error;
+                          }
                           if (insertErr) {
                             console.error("Erro ao registrar atendimento no Supabase:", insertErr);
                             throw new Error(insertErr.message || "Erro ao registrar atendimento no banco.");
@@ -5498,8 +5821,9 @@ export default function App() {
                         setAppealSentSuccess(true);
                         const createdBlockedTicket: AtendimentoItem = {
                           id: protocolNumber,
-                          user_id: blockedAccountInfo?.id,
-                          id_do_usuario: blockedAccountInfo?.id,
+                          matricula_usuario: blockedMat,
+                          user_id: blockedMat || blockedAccountInfo?.id,
+                          id_do_usuario: blockedMat || blockedAccountInfo?.id,
                           nome: blockedAccountInfo?.name || "Usuário",
                           email: blockedAccountInfo?.email || "",
                           tipo: "Bloqueio de Conta",
@@ -7849,7 +8173,7 @@ export default function App() {
                   type="text"
                   value={userSearchTerm}
                   onChange={(e) => setUserSearchTerm(e.target.value)}
-                  placeholder="Pesquisar por nome, e-mail ou ID do usuário (ex: 6 últimos números)..."
+                  placeholder="Pesquisar por nome, e-mail ou Matrícula do usuário (6 números)..."
                   className="w-full bg-zinc-50 border border-zinc-200 rounded-xl pl-10 pr-9 py-2.5 text-xs font-semibold text-zinc-900 focus:outline-none focus:border-blue-600 focus:bg-white transition-all shadow-2xs"
                 />
                 {userSearchTerm && (
@@ -7880,7 +8204,7 @@ export default function App() {
                 <table className="w-full text-left border-collapse">
                   <thead>
                     <tr className="bg-zinc-50/80 border-b border-zinc-200 text-[11px] font-black uppercase text-zinc-500 tracking-wider">
-                      <th className="py-3.5 px-5">Usuário / E-mail / UID</th>
+                      <th className="py-3.5 px-5">Usuário / E-mail / Matrícula</th>
                       <th className="py-3.5 px-5">Cargo / Papel</th>
                       <th className="py-3.5 px-5">Data de Cadastro</th>
                       <th className="py-3.5 px-5">Acesso</th>
@@ -7891,8 +8215,7 @@ export default function App() {
                     {allUsers
                       .filter((item) => matchesUserSearch(item, userSearchTerm, allUsers))
                       .map((item) => {
-                        const formattedUid = formatUserUidWithSixDigits(item.id, allUsers);
-                        const uidParts = formattedUid.split(".");
+                        const userMatricula = extractMatricula(item.matricula || item.id, allUsers);
                         return (
                         <tr 
                           key={item.id} 
@@ -7914,8 +8237,8 @@ export default function App() {
                                   )}
                                 </div>
                                 <div className="text-[11px] text-zinc-500 truncate">{item.email}</div>
-                                <div className="text-[10px] font-mono text-zinc-400 mt-0.5" title={`UID: ${formattedUid}`}>
-                                  UID: {uidParts[0]}<span className="font-black text-[#0b439c]">.{uidParts[1]}</span>
+                                <div className="text-[10px] font-mono text-zinc-500 mt-0.5" title={`Matrícula: ${userMatricula}`}>
+                                  Matrícula: <span className="font-black text-[#0b439c]">{userMatricula}</span>
                                 </div>
                               </div>
                             </div>
@@ -8051,12 +8374,11 @@ export default function App() {
                           <Mail className="w-4 h-4 text-zinc-400 shrink-0" />
                           <span>{editUserEmail || editingUser.email}</span>
                         </p>
-                        {editingUser.id && (() => {
-                          const fUid = formatUserUidWithSixDigits(editingUser.id, allUsers);
-                          const fParts = fUid.split(".");
+                        {(editingUser.matricula || editingUser.id) && (() => {
+                          const userMat = extractMatricula(editingUser.matricula || editingUser.id, allUsers);
                           return (
-                            <p className="text-xs font-mono text-zinc-500 mt-1 bg-zinc-50 border border-zinc-200/80 px-2.5 py-1 rounded-lg inline-block">
-                              UID: {fParts[0]}<span className="font-black text-[#0b439c]">.{fParts[1]}</span>
+                            <p className="text-xs font-mono text-zinc-600 mt-1 bg-zinc-50 border border-zinc-200/80 px-2.5 py-1 rounded-lg inline-block">
+                              Matrícula: <span className="font-black text-[#0b439c]">{userMat}</span>
                             </p>
                           );
                         })()}
@@ -9669,6 +9991,11 @@ export default function App() {
                         <Mail className="w-4 h-4 text-zinc-400 shrink-0" />
                         <span>{user ? user.email : "Acesso Offline / Local"}</span>
                       </p>
+                      {user && (
+                        <p className="text-xs font-mono text-zinc-600 mt-1 bg-zinc-50 border border-zinc-200/80 px-2.5 py-1 rounded-lg inline-block">
+                          Matrícula: <span className="font-black text-[#0b439c]">{extractMatricula((user as any)?.matricula || user.id, allUsers)}</span>
+                        </p>
+                      )}
                     </div>
 
                     <p className="text-xs text-zinc-400">
@@ -10016,8 +10343,7 @@ export default function App() {
         {activeTab === "atendimento" && (() => {
           // Se o administrador clicou em "Ver Usuário" dentro de um atendimento, abre a ficha completa do usuário aqui mesmo com botão "Voltar para Atendimento"
           if (editingUser && editingUserFromAtendimento) {
-            const fUid = formatUserUidWithSixDigits(editingUser.id, allUsers);
-            const fParts = fUid.split(".");
+            const userMat = extractMatricula(editingUser.matricula || editingUser.id, allUsers);
             return (
               <motion.div
                 initial={{ opacity: 0, y: 12 }}
@@ -10075,9 +10401,9 @@ export default function App() {
                           <Mail className="w-4 h-4 text-zinc-400 shrink-0" />
                           <span>{editUserEmail || editingUser.email}</span>
                         </p>
-                        {editingUser.id && (
-                          <p className="text-xs font-mono text-zinc-500 mt-1 bg-zinc-50 border border-zinc-200/80 px-2.5 py-1 rounded-lg inline-block">
-                            UID: {fParts[0]}<span className="font-black text-[#0b439c]">.{fParts[1]}</span>
+                        {(editingUser.matricula || editingUser.id) && (
+                          <p className="text-xs font-mono text-zinc-600 mt-1 bg-zinc-50 border border-zinc-200/80 px-2.5 py-1 rounded-lg inline-block">
+                            Matrícula: <span className="font-black text-[#0b439c]">{userMat}</span>
                           </p>
                         )}
                       </div>
@@ -10471,7 +10797,8 @@ export default function App() {
                 onNavigateToUser={(targetUser) => {
                   if (targetUser && typeof targetUser === "object") {
                     const matched = allUsers.find(u =>
-                      (targetUser.id && u.id === targetUser.id) ||
+                      (targetUser.matricula && (u.matricula === targetUser.matricula || extractMatricula(u.matricula || u.id, allUsers) === extractMatricula(targetUser.matricula, allUsers))) ||
+                      (targetUser.id && (u.id === targetUser.id || u.matricula === targetUser.id)) ||
                       (targetUser.email && u.email && u.email.toLowerCase() === targetUser.email.toLowerCase()) ||
                       (targetUser.name && (u.name || u.nome) && String(u.name || u.nome).toLowerCase() === String(targetUser.name).toLowerCase())
                     );
@@ -10525,18 +10852,17 @@ export default function App() {
               }
             }
 
-            // Busca por texto (nome, email, ID do usuário completo ou 6 últimos dígitos, protocolo ou mensagem)
+            // Busca por texto (nome, email, Matrícula de 6 dígitos, protocolo ou mensagem)
             if (ticketSearchTerm.trim()) {
               const q = ticketSearchTerm.toLowerCase().trim();
               const qNoDot = q.replace(/^\./, "");
-              const rawUid = ticket.user_id || ticket.id_do_usuario || "";
-              const formattedUid = rawUid ? formatUserUidWithSixDigits(rawUid, allUsers).toLowerCase() : "";
-              const sixDigits = rawUid ? getUserSixDigitSuffix(rawUid, allUsers).toLowerCase() : "";
+              const rawMatOrId = ticket.matricula_usuario || ticket.user_id || ticket.id_do_usuario || "";
+              const mat6 = rawMatOrId ? extractMatricula(rawMatOrId, allUsers).toLowerCase() : "";
 
               const matchId = ticket.id.toLowerCase().includes(q);
               const matchName = (ticket.nome || "").toLowerCase().includes(q);
               const matchEmail = (ticket.email || "").toLowerCase().includes(q);
-              const matchUserId = rawUid.toLowerCase().includes(q) || formattedUid.includes(q) || (sixDigits && sixDigits.includes(qNoDot));
+              const matchUserId = rawMatOrId.toLowerCase().includes(q) || (mat6 !== "" && mat6.includes(qNoDot));
               const matchMsg = ticket.mensagem.toLowerCase().includes(q);
               const matchType = ticket.tipo.toLowerCase().includes(q);
               const matchReply = (ticket.resposta || "").toLowerCase().includes(q);
@@ -10564,29 +10890,27 @@ export default function App() {
               }
               if (printUserMode === "specific") {
                 if (printSelectedUser) {
-                  const tUid = String(t.user_id || t.id_do_usuario || "").trim().toLowerCase();
-                  const selUid = String(printSelectedUser.id || "").trim().toLowerCase();
+                  const tMat = extractMatricula(t.matricula_usuario || t.user_id || t.id_do_usuario || "", allUsers).toLowerCase();
+                  const selMat = extractMatricula(printSelectedUser.matricula || printSelectedUser.id || "", allUsers).toLowerCase();
                   const tEmail = String(t.email || "").trim().toLowerCase();
                   const selEmail = String(printSelectedUser.email || "").trim().toLowerCase();
                   const tName = String(t.nome || "").trim().toLowerCase();
                   const selName = String(printSelectedUser.name || printSelectedUser.nome || "").trim().toLowerCase();
 
-                  if (selUid && tUid && selUid === tUid) return true;
+                  if (selMat && tMat && selMat === tMat) return true;
                   if (selEmail && tEmail && selEmail === tEmail) return true;
                   if (selName && tName && selName === tName) return true;
                   return false;
                 } else if (printUserSearchQuery.trim()) {
                   const q = printUserSearchQuery.toLowerCase().trim();
                   const qNoDot = q.replace(/^\./, "");
-                  const rawUid = t.user_id || t.id_do_usuario || "";
-                  const formattedUid = rawUid ? formatUserUidWithSixDigits(rawUid, allUsers).toLowerCase() : "";
-                  const sixDigits = rawUid ? getUserSixDigitSuffix(rawUid, allUsers).toLowerCase() : "";
+                  const rawMatOrId = t.matricula_usuario || t.user_id || t.id_do_usuario || "";
+                  const mat6 = rawMatOrId ? extractMatricula(rawMatOrId, allUsers).toLowerCase() : "";
                   return (
                     (t.nome || "").toLowerCase().includes(q) ||
                     (t.email || "").toLowerCase().includes(q) ||
-                    rawUid.toLowerCase().includes(q) ||
-                    formattedUid.includes(q) ||
-                    (sixDigits !== "" && sixDigits.includes(qNoDot))
+                    rawMatOrId.toLowerCase().includes(q) ||
+                    (mat6 !== "" && mat6.includes(qNoDot))
                   );
                 }
               }
@@ -10860,7 +11184,7 @@ export default function App() {
                                   setPrintSelectedUser(null);
                                 }
                               }}
-                              placeholder="Digite o nome, e-mail ou os 6 últimos números do ID do usuário..."
+                              placeholder="Digite o nome, e-mail ou a Matrícula do usuário (6 números)..."
                               className="w-full pl-10 pr-9 py-2.5 bg-white border border-zinc-200 rounded-xl text-xs font-medium text-zinc-800 placeholder-zinc-400 focus:outline-none focus:border-[#0b439c] shadow-2xs"
                             />
                             {printUserSearchQuery && (
@@ -10900,8 +11224,7 @@ export default function App() {
                                 </div>
                               ) : (
                                 matchingUsersForPrint.map((uItem) => {
-                                  const fUid = formatUserUidWithSixDigits(uItem.id, allUsers);
-                                  const fParts = fUid.split(".");
+                                  const uMat = extractMatricula(uItem.matricula || uItem.id, allUsers);
                                   const isSelected = printSelectedUser?.id === uItem.id;
                                   return (
                                     <button
@@ -10921,7 +11244,7 @@ export default function App() {
                                         <span className="text-zinc-500 ml-2 font-mono">{uItem.email}</span>
                                       </div>
                                       <span className="font-mono text-[11px] text-zinc-500">
-                                        UID: {fParts[0]}<strong className="text-[#0b439c]">.{fParts[1]}</strong>
+                                        Matrícula: <strong className="text-[#0b439c]">{uMat}</strong>
                                       </span>
                                     </button>
                                   );
@@ -11000,14 +11323,14 @@ export default function App() {
 
               {/* Barra de Filtros Empilhados (Um embaixo do outro, sem rolagem para o lado) */}
               <div className="bg-white p-5 rounded-3xl border border-zinc-200/80 shadow-2xs space-y-4">
-                {/* Linha 1: Campo de Busca Completo (Nome, Email, ID, Protocolo) */}
+                {/* Linha 1: Campo de Busca Completo (Nome, Email, Matrícula, Protocolo) */}
                 <div className="relative w-full">
                   <Search className="w-4 h-4 text-zinc-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                   <input
                     type="text"
                     value={ticketSearchTerm}
                     onChange={(e) => setTicketSearchTerm(e.target.value)}
-                    placeholder="Pesquisar por nome do usuário, e-mail, ID do usuário ou protocolo..."
+                    placeholder="Pesquisar por nome do usuário, e-mail, Matrícula ou protocolo..."
                     className="w-full pl-10 pr-9 py-2.5 bg-zinc-50 border border-zinc-200 rounded-xl text-xs font-medium text-zinc-800 placeholder-zinc-400 focus:outline-none focus:border-blue-600 focus:bg-white transition-all shadow-2xs"
                   />
                   {ticketSearchTerm && (
@@ -11256,7 +11579,7 @@ export default function App() {
                           </div>
                         </div>
 
-                        {/* Dados do Solicitante: Nome, E-mail e Botão Ver Atendimento (SEM o texto da mensagem para o card ficar limpo e compacto) */}
+                        {/* Dados do Solicitante: Nome, E-mail, Matrícula e Botão Ver Atendimento */}
                         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
                           <div className="flex items-center gap-4 text-xs bg-zinc-50/70 px-3.5 py-2.5 rounded-xl border border-zinc-150 flex-wrap flex-1">
                             <div className="flex items-center gap-2">
@@ -11267,6 +11590,14 @@ export default function App() {
                               <div className="flex items-center gap-1.5 text-zinc-600">
                                 <Mail className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
                                 <span className="font-mono">{item.email}</span>
+                              </div>
+                            )}
+                            {(item.matricula_usuario || item.user_id || item.id_do_usuario) && (
+                              <div className="flex items-center gap-1.5 text-zinc-600 font-mono">
+                                <span className="text-[10px] font-bold uppercase text-zinc-400">Matrícula:</span>
+                                <span className="font-black text-[#0b439c]">
+                                  {extractMatricula(item.matricula_usuario || item.user_id || item.id_do_usuario || "", allUsers)}
+                                </span>
                               </div>
                             )}
                           </div>
@@ -11299,7 +11630,7 @@ export default function App() {
         })()}
 
         {activeTab === "documentos" && (
-          <DocumentosManager allUsers={allUsers} currentAdminName={studentName} currentUserId={user?.id} />
+          <DocumentosManager allUsers={allUsers} currentAdminName={studentName} currentUserId={user?.user_metadata?.matricula || user?.id} />
         )}
 
       </main>

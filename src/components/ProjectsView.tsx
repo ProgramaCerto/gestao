@@ -320,11 +320,12 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({
   const [previewTab, setPreviewTab] = useState<"preview" | "console">("preview");
   const [consoleLogs, setConsoleLogs] = useState<Array<{ type: "log" | "error" | "info"; msg: string }>>([]);
 
-  // Project Progress Tracking (projetos_progresso)
+  // Project Progress Tracking (projeto_progresso)
   const [projectProgress, setProjectProgress] = useState<{
     [projId: string]: {
       id?: string;
       id_do_projeto: string;
+      matricula_usuario?: string;
       id_do_usuario?: string;
       status: "Não iniciado" | "Em andamento" | "Finalizado";
       id_epc: string;
@@ -353,7 +354,19 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({
       if (!isSupabaseConfigured || !supabase) return;
       try {
         const { data: authUser } = await supabase.auth.getUser();
-        const currentUserId = authUser?.user?.id;
+        let currentUserId = authUser?.user?.id || "";
+        const currentUserEmail = authUser?.user?.email || "";
+        if (currentUserEmail) {
+          const { data: uRow } = await supabase
+            .from("usuarios")
+            .select("matricula")
+            .ilike("email", currentUserEmail)
+            .limit(1)
+            .maybeSingle();
+          if (uRow?.matricula) {
+            currentUserId = String(uRow.matricula);
+          }
+        }
 
         let queryProjetos = supabase.from("projetos_cursos").select("*");
         const { data: dbProjetos, error: projErr } = await queryProjetos;
@@ -389,29 +402,40 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({
           setActiveProjectId(loaded[0].id);
         }
 
-        // Load project progress from 'projeto_progresso' (or fallback to 'projetos_progresso')
+        // Load project progress from 'projeto_progresso' (using matricula_usuario, fallback to id_do_usuario / 'projetos_progresso')
         let queryProg = supabase.from("projeto_progresso").select("*");
         if (currentUserId) {
-          queryProg = queryProg.eq("id_do_usuario", currentUserId);
+          queryProg = queryProg.eq("matricula_usuario", currentUserId);
         }
         let { data: dbProg, error: progErr } = await queryProg;
-        if (progErr) {
-          let fallbackQuery = supabase.from("projetos_progresso").select("*");
+        if (progErr || !dbProg || dbProg.length === 0) {
+          let fallbackQuery1 = supabase.from("projeto_progresso").select("*");
           if (currentUserId) {
-            fallbackQuery = fallbackQuery.eq("id_do_usuario", currentUserId);
+            fallbackQuery1 = fallbackQuery1.eq("id_do_usuario", currentUserId);
           }
-          const fb = await fallbackQuery;
-          dbProg = fb.data;
+          const fb1 = await fallbackQuery1;
+          if (!fb1.error && fb1.data && fb1.data.length > 0) {
+            dbProg = fb1.data;
+          } else {
+            let fallbackQuery2 = supabase.from("projetos_progresso").select("*");
+            if (currentUserId) {
+              fallbackQuery2 = fallbackQuery2.eq("matricula_usuario", currentUserId);
+            }
+            const fb2 = await fallbackQuery2;
+            dbProg = fb2.data;
+          }
         }
 
         if (dbProg && dbProg.length > 0) {
           const pMap: any = {};
           dbProg.forEach((item: any) => {
             if (item.id_do_projeto) {
+              const matVal = String(item.matricula_usuario || item.id_do_usuario || "");
               pMap[String(item.id_do_projeto)] = {
                 id: String(item.id),
                 id_do_projeto: String(item.id_do_projeto),
-                id_do_usuario: String(item.id_do_usuario || ""),
+                matricula_usuario: matVal,
+                id_do_usuario: matVal,
                 status: item.status || "Não iniciado",
                 id_epc: item.id_epc || item.link_do_projeto || ""
               };
@@ -455,17 +479,29 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({
     return matchesSearch && matchesStatus;
   });
 
-  // Helper to safely write progress to 'projeto_progresso' (or 'projetos_progresso' fallback)
+  // Helper to safely write progress to 'projeto_progresso' (using matricula_usuario)
   const upsertProjectProgressDb = async (projId: string, statusVal: string, epcVal?: string | null) => {
     if (!isSupabaseConfigured || !supabase) return;
     try {
       const numId = parseInt(projId, 10) || projId;
       const { data: authUser } = await supabase.auth.getUser();
-      const uId = authUser?.user?.id || null;
+      let uMat = authUser?.user?.id || null;
+      const uEmail = authUser?.user?.email || "";
+      if (uEmail) {
+        const { data: uRow } = await supabase
+          .from("usuarios")
+          .select("matricula")
+          .ilike("email", uEmail)
+          .limit(1)
+          .maybeSingle();
+        if (uRow?.matricula) {
+          uMat = String(uRow.matricula);
+        }
+      }
 
-      // Try 'projeto_progresso'
+      // Try 'projeto_progresso' with matricula_usuario
       let query1 = supabase.from("projeto_progresso").select("id").eq("id_do_projeto", numId);
-      if (uId) query1 = query1.eq("id_do_usuario", uId);
+      if (uMat) query1 = query1.eq("matricula_usuario", uMat);
       let { data: existing, error: pErr } = await query1.limit(1).maybeSingle();
 
       if (!pErr) {
@@ -473,12 +509,12 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({
           await supabase.from("projeto_progresso").update({
             status: statusVal,
             id_epc: epcVal ?? null,
-            ...(uId ? { id_do_usuario: uId } : {})
+            ...(uMat ? { matricula_usuario: uMat } : {})
           }).eq("id", existing.id);
         } else {
           await supabase.from("projeto_progresso").insert({
             id_do_projeto: numId,
-            id_do_usuario: uId,
+            matricula_usuario: uMat,
             status: statusVal,
             id_epc: epcVal ?? null
           });
@@ -486,21 +522,21 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({
         return;
       }
 
-      // Fallback 'projetos_progresso'
+      // Fallback 'projeto_progresso' with id_do_usuario or 'projetos_progresso'
       let query2 = supabase.from("projetos_progresso").select("id").eq("id_do_projeto", numId);
-      if (uId) query2 = query2.eq("id_do_usuario", uId);
+      if (uMat) query2 = query2.eq("matricula_usuario", uMat);
       const { data: existing2 } = await query2.limit(1).maybeSingle();
 
       if (existing2) {
         await supabase.from("projetos_progresso").update({
           status: statusVal,
           id_epc: epcVal ?? null,
-          ...(uId ? { id_do_usuario: uId } : {})
+          ...(uMat ? { matricula_usuario: uMat } : {})
         }).eq("id", existing2.id);
       } else {
         await supabase.from("projetos_progresso").insert({
           id_do_projeto: numId,
-          id_do_usuario: uId,
+          matricula_usuario: uMat,
           status: statusVal,
           id_epc: epcVal ?? null
         });

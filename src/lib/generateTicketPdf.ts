@@ -5,14 +5,19 @@ import { LOGO_PROGRAMA_CERTO_BASE64 } from "./logoBase64";
 const JsPdfClass: any = (jspdfLib as any).jsPDF || (jspdfLib as any).default || jspdfLib;
 
 /**
- * Extrai ou gera de forma determinística e única os 6 últimos dígitos numéricos (0-9) do UID de um usuário.
- * Garante que cada usuário tenha uma terminação de 6 números exclusiva (ex: .385793).
+ * Extrai ou gera de forma determinística a Matrícula numérica de 6 dígitos (0-9) de um usuário.
+ * Caso o registro já seja uma matrícula de 6 dígitos ou possua terminação de 6 números, retorna os 6 números.
  */
-export function getUserSixDigitSuffix(rawId?: string | null, allUsersList?: any[]): string {
-  if (!rawId || rawId === "ID não registrado") return "000000";
-  const cleaned = String(rawId).trim();
+export function extractMatricula(rawValue?: string | null, allUsersList?: any[]): string {
+  if (!rawValue || rawValue === "ID não registrado" || rawValue === "Não informada") return "000000";
+  const cleaned = String(rawValue).trim();
 
-  // Se já tiver ponto seguido de 6 números no final
+  // Se já for exatamente 6 números
+  if (/^\d{6}$/.test(cleaned)) {
+    return cleaned;
+  }
+
+  // Se tiver ponto seguido de 6 números no final
   const dotMatch = cleaned.match(/\.(\d{6})$/);
   if (dotMatch) return dotMatch[1];
 
@@ -23,7 +28,7 @@ export function getUserSixDigitSuffix(rawId?: string | null, allUsersList?: any[
     return last6;
   }
 
-  // Caso algum ID antigo termine com letras hexadecimais (a-f), converte deterministicamente para 6 números
+  // Caso algum registro antigo tenha caracteres alfanuméricos, converte deterministicamente para 6 dígitos
   let hash = 0;
   for (let i = 0; i < cleaned.length; i++) {
     hash = (hash * 31 + cleaned.charCodeAt(i)) % 900000;
@@ -31,17 +36,17 @@ export function getUserSixDigitSuffix(rawId?: string | null, allUsersList?: any[
   let num = 100000 + Math.abs(hash);
 
   if (allUsersList && allUsersList.length > 0) {
-    const usedSuffixes = new Set<string>();
+    const usedMatriculas = new Set<string>();
     for (const u of allUsersList) {
-      const uid = u?.id ? String(u.id).trim() : "";
-      if (!uid || uid === cleaned) continue;
-      const uAlnum = uid.replace(/[^a-zA-Z0-9]/g, "");
+      const uMat = String(u?.matricula || u?.id || "").trim();
+      if (!uMat || uMat === cleaned) continue;
+      const uAlnum = uMat.replace(/[^a-zA-Z0-9]/g, "");
       const uLast6 = uAlnum.slice(-6);
       if (/^\d{6}$/.test(uLast6)) {
-        usedSuffixes.add(uLast6);
+        usedMatriculas.add(uLast6);
       }
     }
-    while (usedSuffixes.has(String(num).padStart(6, "0"))) {
+    while (usedMatriculas.has(String(num).padStart(6, "0"))) {
       num = ((num - 100000 + 1) % 900000) + 100000;
     }
   }
@@ -50,61 +55,38 @@ export function getUserSixDigitSuffix(rawId?: string | null, allUsersList?: any[
 }
 
 /**
- * Formata o UID do usuário no padrão visual com ponto antes dos 6 últimos números únicos:
- * Ex: 9fc5929d-ddda-4aab-b0f6-abaffb.385793
+ * Gera uma nova Matrícula exclusiva de 6 dígitos numéricos (ex: 482915) para novos cadastros na tabela usuarios.
  */
-export function formatUserUidWithSixDigits(rawId?: string | null, allUsersList?: any[]): string {
-  if (!rawId || rawId === "ID não registrado") return "ID não registrado";
-  const cleaned = String(rawId).trim();
-  if (cleaned.includes(".") && /\.\d{6}$/.test(cleaned)) {
-    return cleaned;
-  }
-  const suffix = getUserSixDigitSuffix(cleaned, allUsersList);
-  if (cleaned.length > 6) {
-    return `${cleaned.slice(0, -6)}.${suffix}`;
-  }
-  return `${cleaned}.${suffix}`;
-}
-
-/**
- * Gera um novo UUID v4 válido para o banco de dados garantindo que os últimos 6 caracteres
- * sejam 6 números (0-9) exclusivos que não colidem com nenhum outro usuário cadastrado.
- */
-export function generateUniqueUserUUID(existingUsers: any[] = []): string {
-  const existingSuffixes = new Set<string>(
-    existingUsers.map((u) => getUserSixDigitSuffix(u?.id))
+export function generateMatricula(existingUsers: any[] = []): string {
+  const existingSet = new Set<string>(
+    existingUsers.map((u) => extractMatricula(u?.matricula || u?.id))
   );
 
-  let sixDigits = "";
   for (let attempt = 0; attempt < 1000; attempt++) {
     const candidate = String(Math.floor(100000 + Math.random() * 900000));
-    if (!existingSuffixes.has(candidate)) {
-      sixDigits = candidate;
-      break;
+    if (!existingSet.has(candidate)) {
+      return candidate;
     }
   }
-  if (!sixDigits) {
-    sixDigits = String(Date.now()).slice(-6).padStart(6, "0");
-  }
+  return String(Date.now()).slice(-6).padStart(6, "0");
+}
 
-  const baseUuid =
-    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
-      ? crypto.randomUUID()
-      : "10000000-1000-4000-8000-100000000000".replace(/[018]/g, (c: any) =>
-          (
-            +c ^
-            ((typeof crypto !== "undefined" && crypto.getRandomValues
-              ? crypto.getRandomValues(new Uint8Array(1))[0]
-              : Math.floor(Math.random() * 16)) &
-              (15 >> (+c / 4)))
-          ).toString(16)
-        );
+// Mantidos para compatibilidade com chamadas legadas
+export function getUserSixDigitSuffix(rawId?: string | null, allUsersList?: any[]): string {
+  return extractMatricula(rawId, allUsersList);
+}
 
-  return `${baseUuid.slice(0, -6)}${sixDigits}`;
+export function formatUserUidWithSixDigits(rawId?: string | null, allUsersList?: any[]): string {
+  if (!rawId || rawId === "ID não registrado" || rawId === "Não informada") return "Não informada";
+  return extractMatricula(rawId, allUsersList);
+}
+
+export function generateUniqueUserUUID(existingUsers: any[] = []): string {
+  return generateMatricula(existingUsers);
 }
 
 /**
- * Verifica se um usuário corresponde ao termo pesquisado (por Nome, E-mail, UID completo ou pelos 6 últimos dígitos).
+ * Verifica se um usuário corresponde ao termo pesquisado (por Nome, E-mail ou Matrícula de 6 dígitos).
  */
 export function matchesUserSearch(userItem: any, searchTerm: string, allUsersList?: any[]): boolean {
   const q = (searchTerm || "").toLowerCase().trim();
@@ -112,18 +94,16 @@ export function matchesUserSearch(userItem: any, searchTerm: string, allUsersLis
 
   const name = String(userItem?.name || userItem?.nome || "").toLowerCase();
   const email = String(userItem?.email || "").toLowerCase();
-  const rawId = String(userItem?.id || "").toLowerCase();
-  const formattedUid = formatUserUidWithSixDigits(userItem?.id, allUsersList).toLowerCase();
-  const sixDigits = getUserSixDigitSuffix(userItem?.id, allUsersList).toLowerCase();
-  const qWithoutDot = q.replace(/^\./, "");
+  const rawMat = String(userItem?.matricula || userItem?.id || "").toLowerCase();
+  const matricula = extractMatricula(userItem?.matricula || userItem?.id, allUsersList).toLowerCase();
+  const qClean = q.replace(/^[.#]/, "");
 
   return (
     name.includes(q) ||
     email.includes(q) ||
-    rawId.includes(q) ||
-    rawId.includes(qWithoutDot) ||
-    formattedUid.includes(q) ||
-    sixDigits.includes(qWithoutDot)
+    rawMat.includes(q) ||
+    rawMat.includes(qClean) ||
+    matricula.includes(qClean)
   );
 }
 
@@ -159,8 +139,10 @@ function renderTicketOnPdfPage(doc: any, ticket: AtendimentoItem) {
     }
   };
 
-  const rawUserId = ticket.user_id || ticket.id_do_usuario || "";
-  const effectiveUserId = rawUserId ? formatUserUidWithSixDigits(rawUserId) : "ID não registrado";
+  const rawUserId = ticket.matricula_usuario || ticket.user_id || ticket.id_do_usuario || "";
+  const effectiveMatricula = rawUserId && rawUserId !== "Não informada" && rawUserId !== "ID não registrado"
+    ? extractMatricula(rawUserId)
+    : "Não informada";
   const effectiveEmail = ticket.email?.trim() || "E-mail não informado";
   const effectiveName = ticket.nome || "Não informado";
 
@@ -235,7 +217,7 @@ function renderTicketOnPdfPage(doc: any, ticket: AtendimentoItem) {
       doc.setFont("helvetica", "bold");
       doc.setTextColor(71, 85, 105);
       doc.text(
-        `Continuação do Chamado ${cleanProtocol}  •  Solicitante: ${String(effectiveName).slice(0, 32)} (${String(effectiveEmail).slice(0, 34)})`,
+        `Continuação do Chamado ${cleanProtocol}  •  Solicitante: ${String(effectiveName).slice(0, 28)}  •  Matrícula: ${effectiveMatricula}`,
         margin + 4,
         curY + 5.8
       );
@@ -267,7 +249,7 @@ function renderTicketOnPdfPage(doc: any, ticket: AtendimentoItem) {
   const row1Y = y + 7.5;
   const row2Y = y + 23;
 
-  // Linha 1: Solicitante (Nome), E-mail, ID do Usuário
+  // Linha 1: Solicitante (Nome), E-mail, Matrícula
   doc.setFontSize(7);
   doc.setFont("helvetica", "bold");
   doc.setTextColor(100, 116, 139);
@@ -289,11 +271,11 @@ function renderTicketOnPdfPage(doc: any, ticket: AtendimentoItem) {
   doc.setFontSize(7);
   doc.setFont("helvetica", "bold");
   doc.setTextColor(100, 116, 139);
-  doc.text("ID DO USUÁRIO (UID)", col3X, row1Y);
-  doc.setFontSize(6.8);
+  doc.text("MATRÍCULA", col3X, row1Y);
+  doc.setFontSize(8.5);
   doc.setFont("courier", "bold");
   doc.setTextColor(39, 39, 42);
-  doc.text(String(effectiveUserId), col3X, row1Y + 5);
+  doc.text(String(effectiveMatricula), col3X, row1Y + 5);
 
   // Linha 2: Tipo de Solicitação, Data/Hora, Status Atual
   doc.setFont("helvetica", "bold");
@@ -778,7 +760,7 @@ export function generateTicketPdfBlobUrl(ticket: AtendimentoItem): string {
 }
 
 /**
- * Enriquecimento dos dados do chamado com informações da lista de usuários (UID com 6 números finais, E-mail e Nome).
+ * Enriquecimento dos dados do chamado com informações da lista de usuários (Matrícula de 6 dígitos, E-mail e Nome).
  */
 export function enrichTicketsWithUserData(
   ticketsList: AtendimentoItem[],
@@ -787,9 +769,10 @@ export function enrichTicketsWithUserData(
 ): AtendimentoItem[] {
   if (!ticketsList || ticketsList.length === 0) return [];
   return ticketsList.map((ticket) => {
+    const ticketRawMat = ticket.matricula_usuario || ticket.user_id || ticket.id_do_usuario || "";
     const studentUser = allUsersList.find((u) => {
-      if (ticket.user_id && u.id && u.id === ticket.user_id) return true;
-      if (ticket.id_do_usuario && u.id && u.id === ticket.id_do_usuario) return true;
+      const uMat = String(u.matricula || u.id || "");
+      if (ticketRawMat && uMat && (uMat === ticketRawMat || extractMatricula(uMat) === extractMatricula(ticketRawMat))) return true;
       if (ticket.email && u.email && u.email.toLowerCase() === ticket.email.toLowerCase()) return true;
       if (
         ticket.nome &&
@@ -800,10 +783,12 @@ export function enrichTicketsWithUserData(
       return false;
     });
 
-    const rawUid = ticket.user_id || ticket.id_do_usuario || studentUser?.id || "";
+    const rawMat = ticketRawMat || studentUser?.matricula || studentUser?.id || "";
+    const matriculaVal = rawMat ? extractMatricula(rawMat, allUsersList) : "";
     return {
       ...ticket,
-      user_id: rawUid ? formatUserUidWithSixDigits(rawUid, allUsersList) : ticket.user_id,
+      matricula_usuario: matriculaVal || ticket.matricula_usuario,
+      user_id: matriculaVal || ticket.user_id,
       email: ticket.email || studentUser?.email || "E-mail não informado",
       nome: ticket.nome || studentUser?.nome || studentUser?.name || "Solicitante",
       respondido_por: ticket.respondido_por || adminName

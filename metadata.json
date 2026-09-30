@@ -1,6 +1,8 @@
 {
-  "name": "Gestão - Conexão GitHub",
-  "description": "Aplicação integrada ao repositório GitHub gestao.",
+  "name": "gestao Pc nova",
+  "description": "Uma plataforma de ensino de tecnologia completa. Oferece trilhas de Front-end, Back-end, Ciência de Dados e Mobile, com aulas, testes interativos, geração de certificados, e um Tutor de IA integrado para responder a dúvidas.",
   "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
 }

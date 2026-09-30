@@ -6,6 +6,7 @@ DROP TABLE IF EXISTS public.pastas CASCADE;
 
 CREATE TABLE public.pastas (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  matricula_usuario TEXT,
   id_usuario TEXT,
   nome VARCHAR(255) NOT NULL,
   criado_em TIMESTAMPTZ DEFAULT now()
@@ -27,6 +28,7 @@ CREATE POLICY "pastas_policy_all"
 -- ==============================================================================
 CREATE TABLE public.documentos (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  matricula_usuario TEXT,
   id_usuario TEXT,
   pasta_id UUID REFERENCES public.pastas(id) ON DELETE SET NULL,
 

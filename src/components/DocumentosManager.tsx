@@ -39,6 +39,7 @@ import { openDocumentPdfInBrowser, printDocumentInBrowser } from "../lib/generat
 
 export interface DocFolder {
   id: string;
+  matricula_usuario?: string;
   id_usuario?: string;
   nome: string;
   criado_em: string;
@@ -46,6 +47,7 @@ export interface DocFolder {
 
 export interface DocumentItem {
   id: string;
+  matricula_usuario?: string;
   id_usuario?: string;
   pasta_id: string | null; // null = sem pasta / fora de pasta
   titulo: string;
@@ -989,13 +991,23 @@ export function DocumentosManager({ allUsers = [], currentAdminName = "Administr
         let inserted: any = null;
 
         if (currentUserId) {
-          const res = await supabase
+          const resMat = await supabase
             .from("pastas")
-            .insert({ nome: nomeLimpo, id_usuario: currentUserId })
+            .insert({ nome: nomeLimpo, matricula_usuario: currentUserId })
             .select()
             .single();
-          insertErr = res.error;
-          inserted = res.data;
+          if (!resMat.error && resMat.data) {
+            inserted = resMat.data;
+            insertErr = null;
+          } else {
+            const res = await supabase
+              .from("pastas")
+              .insert({ nome: nomeLimpo, id_usuario: currentUserId })
+              .select()
+              .single();
+            insertErr = res.error;
+            inserted = res.data;
+          }
         }
 
         // Se falhou (por exemplo violação de FK auth.users ou sem sessão de auth), insere sem id_usuario
@@ -1129,13 +1141,23 @@ export function DocumentosManager({ allUsers = [], currentAdminName = "Administr
           let insertErr: any = null;
 
           if (currentUserId) {
-            const res = await supabase
+            const resMat = await supabase
               .from("documentos")
-              .insert(payloadWithUser)
+              .insert({ ...payloadWithUser, id_usuario: undefined, matricula_usuario: currentUserId })
               .select()
               .single();
-            insertErr = res.error;
-            inserted = res.data;
+            if (!resMat.error && resMat.data) {
+              inserted = resMat.data;
+              insertErr = null;
+            } else {
+              const res = await supabase
+                .from("documentos")
+                .insert(payloadWithUser)
+                .select()
+                .single();
+              insertErr = res.error;
+              inserted = res.data;
+            }
           }
 
           // Se der erro (ex: FK com auth.users), tenta inserir sem id_usuario
@@ -1226,13 +1248,23 @@ export function DocumentosManager({ allUsers = [], currentAdminName = "Administr
         let insertErr: any = null;
 
         if (currentUserId) {
-          const res = await supabase
+          const resMat = await supabase
             .from("pastas")
-            .insert({ nome: newFolderName.trim(), id_usuario: currentUserId })
+            .insert({ nome: newFolderName.trim(), matricula_usuario: currentUserId })
             .select()
             .single();
-          insertErr = res.error;
-          inserted = res.data;
+          if (!resMat.error && resMat.data) {
+            inserted = resMat.data;
+            insertErr = null;
+          } else {
+            const res = await supabase
+              .from("pastas")
+              .insert({ nome: newFolderName.trim(), id_usuario: currentUserId })
+              .select()
+              .single();
+            insertErr = res.error;
+            inserted = res.data;
+          }
         }
 
         if (!inserted || insertErr) {

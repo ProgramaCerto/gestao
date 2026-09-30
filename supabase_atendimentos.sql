@@ -3,13 +3,15 @@
 
 CREATE TABLE IF NOT EXISTS public.atendimentos (
   id TEXT PRIMARY KEY,
-  id_do_usuario UUID,
+  matricula_usuario TEXT,
   nome TEXT,
+  email TEXT,
   tipo TEXT,
   mensagem TEXT,
   status TEXT DEFAULT 'Aguardando',
   criado_em TIMESTAMPTZ DEFAULT NOW(),
   mensagem_respondida TEXT,
+  respondido_por TEXT,
   respondido_em TIMESTAMPTZ
 );
 
@@ -26,5 +28,5 @@ CREATE POLICY "Acesso total aos atendimentos" ON public.atendimentos
 -- Índices para consultas rápidas
 CREATE INDEX IF NOT EXISTS idx_atendimentos_status ON public.atendimentos(status);
 CREATE INDEX IF NOT EXISTS idx_atendimentos_criado_em ON public.atendimentos(criado_em DESC);
-CREATE INDEX IF NOT EXISTS idx_atendimentos_id_do_usuario ON public.atendimentos(id_do_usuario);
+CREATE INDEX IF NOT EXISTS idx_atendimentos_matricula_usuario ON public.atendimentos(matricula_usuario);
 

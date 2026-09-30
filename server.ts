@@ -867,11 +867,13 @@ app.get("/api/pdf/atendimento/:protocol", async (req, res) => {
           .maybeSingle();
 
         if (data && !error) {
+          const matVal = data.matricula_usuario || data.id_do_usuario || data.user_id;
           ticket = {
             id: data.id,
-            user_id: data.id_do_usuario || data.user_id,
+            matricula_usuario: matVal,
+            user_id: matVal,
             nome: data.nome || "Usuário",
-            email: "",
+            email: data.email || "",
             tipo: data.tipo || "Geral",
             mensagem: data.mensagem || "",
             status: data.status === "Pendente" ? "Aguardando" : (data.status || "Aguardando"),
@@ -894,13 +896,23 @@ app.get("/api/pdf/atendimento/:protocol", async (req, res) => {
     if (!ticket.email || ticket.email === "E-mail não informado") {
       try {
         if (supabaseServerClient) {
-          if (ticket.user_id) {
+          const targetMat = ticket.matricula_usuario || ticket.user_id;
+          if (targetMat) {
             const { data: u } = await supabaseServerClient
               .from("usuarios")
               .select("email, nome")
-              .eq("id", ticket.user_id)
+              .eq("matricula", targetMat)
               .maybeSingle();
-            if (u?.email) ticket.email = u.email;
+            if (u?.email) {
+              ticket.email = u.email;
+            } else {
+              const { data: uFallback } = await supabaseServerClient
+                .from("usuarios")
+                .select("email, nome")
+                .eq("id", targetMat)
+                .maybeSingle();
+              if (uFallback?.email) ticket.email = uFallback.email;
+            }
           }
           if (!ticket.email && ticket.nome) {
             const { data: u } = await supabaseServerClient

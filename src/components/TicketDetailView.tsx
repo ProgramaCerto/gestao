@@ -22,7 +22,7 @@ import { AtendimentoItem } from "../App";
 import {
   openTicketPdfInBrowser,
   printTicketsInBrowser,
-  formatUserUidWithSixDigits
+  extractMatricula
 } from "../lib/generateTicketPdf";
 
 export interface TicketDetailViewProps {
@@ -95,8 +95,9 @@ export const TicketDetailView: React.FC<TicketDetailViewProps> = ({
 
   // Find associated user in allUsers
   const studentUser = allUsers.find(u => {
-    const tUid = (ticket.user_id || ticket.id_do_usuario || "").trim();
-    if (tUid && u.id && String(u.id).trim() === tUid) return true;
+    const tMat = (ticket.matricula_usuario || ticket.user_id || ticket.id_do_usuario || "").trim();
+    const uMat = String(u.matricula || u.id || "").trim();
+    if (tMat && uMat && (uMat === tMat || extractMatricula(uMat) === extractMatricula(tMat))) return true;
     const tEmail = (ticket.email || "").toLowerCase().trim();
     if (tEmail && u.email && String(u.email).toLowerCase().trim() === tEmail) return true;
     const tName = (ticket.nome || "").toLowerCase().trim();
@@ -104,8 +105,10 @@ export const TicketDetailView: React.FC<TicketDetailViewProps> = ({
     return false;
   });
 
-  const rawUserId = (ticket.user_id || ticket.id_do_usuario || studentUser?.id || "").trim();
-  const effectiveUserId = rawUserId ? formatUserUidWithSixDigits(rawUserId, allUsers) : "ID não registrado";
+  const rawUserId = (ticket.matricula_usuario || ticket.user_id || ticket.id_do_usuario || studentUser?.matricula || studentUser?.id || "").trim();
+  const effectiveMatricula = rawUserId && rawUserId !== "Não informada" && rawUserId !== "ID não registrado"
+    ? extractMatricula(rawUserId, allUsers)
+    : "Não informada";
   const effectiveEmail = (ticket.email || studentUser?.email || "").trim() || "E-mail não informado";
   const effectiveName = (ticket.nome || studentUser?.nome || studentUser?.name || "").trim() || "Solicitante";
   const isAccountBlocked = (studentUser?.acesso === "Bloqueado" || studentUser?.status === "Bloqueado");
@@ -114,12 +117,15 @@ export const TicketDetailView: React.FC<TicketDetailViewProps> = ({
   const studentTicketsHistory = allTickets.filter(t => {
     if (t.id === ticket.id) return true;
 
-    const targetUid = rawUserId.toLowerCase();
-    const itemUid = String(t.user_id || t.id_do_usuario || "").trim().toLowerCase();
+    const targetMat = effectiveMatricula !== "Não informada" ? effectiveMatricula : "";
+    const itemRawMat = String(t.matricula_usuario || t.user_id || t.id_do_usuario || "").trim();
+    const itemMat = itemRawMat && itemRawMat !== "Não informada" && itemRawMat !== "ID não registrado"
+      ? extractMatricula(itemRawMat, allUsers)
+      : "";
 
-    // Se ambos têm ID de usuário registrado, compara estritamente pelo ID do usuário
-    if (targetUid && targetUid !== "id não registrado" && itemUid && itemUid !== "id não registrado") {
-      return itemUid === targetUid;
+    // Se ambos têm matrícula registrada, compara estritamente pela matrícula
+    if (targetMat && itemMat) {
+      return itemMat === targetMat;
     }
 
     // Caso contrário, compara estritamente pelo e-mail válido do solicitante
@@ -154,13 +160,16 @@ export const TicketDetailView: React.FC<TicketDetailViewProps> = ({
     }
   };
 
+  // Handle print using dedicated isolated print iframe
   const handleBackWithScroll = () => {
     scrollPageToTop();
     onBack();
   };
+
   const enrichedTicketForPdf: AtendimentoItem = {
     ...ticket,
-    user_id: rawUserId ? effectiveUserId : ticket.user_id,
+    matricula_usuario: rawUserId ? effectiveMatricula : ticket.matricula_usuario,
+    user_id: rawUserId ? effectiveMatricula : ticket.user_id,
     email: effectiveEmail,
     nome: effectiveName,
     respondido_por: ticket.respondido_por || adminName
@@ -332,7 +341,7 @@ export const TicketDetailView: React.FC<TicketDetailViewProps> = ({
           </div>
         </div>
 
-        {/* Dados do Solicitante (Nome, E-mail, ID do Usuário com final .6números e Botão Consultar Chamados) */}
+        {/* Dados do Solicitante (Nome, E-mail, Matrícula e Botão Consultar Chamados) */}
         <div className="bg-zinc-50/80 rounded-2xl p-5 border border-zinc-200/80 space-y-4">
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs flex-1">
@@ -352,23 +361,16 @@ export const TicketDetailView: React.FC<TicketDetailViewProps> = ({
                 <p className="text-zinc-800 font-medium text-xs truncate">{effectiveEmail}</p>
               </div>
 
-              {/* ID do Usuário (UID com .6números finais) */}
+              {/* Matrícula do Usuário */}
               <div className="space-y-1">
                 <span className="text-zinc-400 font-bold uppercase tracking-wider text-[10px] block">
-                  ID do Usuário
+                  Matrícula
                 </span>
                 <p
-                  className="text-zinc-700 font-mono text-[11px] truncate bg-white px-2.5 py-1 rounded-lg border border-zinc-200/80 inline-block max-w-full"
-                  title={effectiveUserId}
+                  className="text-[#0b439c] font-mono font-black text-xs truncate bg-white px-3 py-1 rounded-lg border border-blue-200/80 inline-block max-w-full shadow-2xs"
+                  title={`Matrícula: ${effectiveMatricula}`}
                 >
-                  {effectiveUserId.includes(".") ? (
-                    <>
-                      <span>{effectiveUserId.split(".")[0]}</span>
-                      <span className="font-black text-[#0b439c]">.{effectiveUserId.split(".")[1]}</span>
-                    </>
-                  ) : (
-                    effectiveUserId
-                  )}
+                  {effectiveMatricula}
                 </p>
               </div>
             </div>
@@ -426,7 +428,8 @@ export const TicketDetailView: React.FC<TicketDetailViewProps> = ({
                         onClick={() =>
                           onNavigateToUser(
                             studentUser || {
-                              id: rawUserId,
+                              id: effectiveMatricula !== "Não informada" ? effectiveMatricula : rawUserId,
+                              matricula: effectiveMatricula !== "Não informada" ? effectiveMatricula : rawUserId,
                               name: effectiveName,
                               email: effectiveEmail !== "E-mail não informado" ? effectiveEmail : "",
                               account_type: "estudante",

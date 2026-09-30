@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 import { motion } from "motion/react";
 import { AtendimentoItem } from "../App";
-import { openTicketPdfInBrowser, printTicketsInBrowser } from "../lib/generateTicketPdf";
+import { openTicketPdfInBrowser, printTicketsInBrowser, extractMatricula } from "../lib/generateTicketPdf";
 
 interface TicketDetailModalProps {
   ticket: AtendimentoItem | null;
@@ -118,13 +118,24 @@ export const TicketDetailModal: React.FC<TicketDetailModalProps> = ({
         </div>
 
         {/* Informações Gerais do Usuário e Data */}
-        <div className="bg-zinc-50 rounded-2xl p-4 border border-zinc-200/70 grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+        <div className="bg-zinc-50 rounded-2xl p-4 border border-zinc-200/70 grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
           <div className="space-y-0.5">
             <span className="text-zinc-400 font-bold uppercase tracking-wider text-[10px] block">
               Aluno / Solicitante
             </span>
             <p className="font-bold text-zinc-900 text-sm">{ticket.nome || "Não informado"}</p>
             <p className="text-zinc-600 font-mono text-xs">{ticket.email || "E-mail não informado"}</p>
+          </div>
+
+          <div className="space-y-0.5">
+            <span className="text-zinc-400 font-bold uppercase tracking-wider text-[10px] block">
+              Matrícula
+            </span>
+            <p className="font-mono font-black text-xs text-[#0b439c] bg-white px-2.5 py-1 rounded-lg border border-blue-200/80 inline-block">
+              {(ticket.matricula_usuario || ticket.user_id || ticket.id_do_usuario)
+                ? extractMatricula(ticket.matricula_usuario || ticket.user_id || ticket.id_do_usuario)
+                : "Não informada"}
+            </p>
           </div>
 
           <div className="space-y-0.5">
