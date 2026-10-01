@@ -48,12 +48,26 @@ export const SECURE_ATENDIMENTO_URL_TOKEN = "Mi4uKilgdXUzLTk3LCgtMS8yNSoiIyoyPjU
 // Payload 4: Chave pública restrita protegida (Projeto Atendimento)
 export const SECURE_ATENDIMENTO_KEY_TOKEN = "KTgFKi84NjMpMjs4Nj8FDm83PQ8ZLx40CTsJMBESDC4JLWIgLQUFDxYuHjEyHg==";
 
+function getEnv(key: string): string {
+  try {
+    if (typeof import.meta !== "undefined" && (import.meta as any)?.env?.[key]) {
+      return (import.meta as any).env[key];
+    }
+  } catch {}
+  try {
+    if (typeof process !== "undefined" && process?.env?.[key]) {
+      return process.env[key] || "";
+    }
+  } catch {}
+  return "";
+}
+
 /**
  * Resolução protegida em runtime:
  * Tenta obter via variáveis de ambiente de build; se não disponíveis, desofusca em memória temporária.
  */
 export function getProtectedEndpoint(): string {
-  const runtimeEnv = (typeof import.meta !== "undefined" && import.meta.env) ? (import.meta.env.VITE_SUPABASE_URL || import.meta.env.NEXT_PUBLIC_SUPABASE_URL) : "";
+  const runtimeEnv = getEnv("VITE_SUPABASE_URL") || getEnv("SUPABASE_URL") || getEnv("NEXT_PUBLIC_SUPABASE_URL");
   if (runtimeEnv && runtimeEnv.length > 8) {
     return runtimeEnv;
   }
@@ -61,7 +75,7 @@ export function getProtectedEndpoint(): string {
 }
 
 export function getProtectedSecret(): string {
-  const runtimeEnv = (typeof import.meta !== "undefined" && import.meta.env) ? (import.meta.env.VITE_SUPABASE_ANON_KEY || import.meta.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY) : "";
+  const runtimeEnv = getEnv("VITE_SUPABASE_ANON_KEY") || getEnv("SUPABASE_ANON_KEY") || getEnv("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY");
   if (runtimeEnv && runtimeEnv.length > 10) {
     return runtimeEnv;
   }
@@ -69,7 +83,7 @@ export function getProtectedSecret(): string {
 }
 
 export function getProtectedAtendimentoEndpoint(): string {
-  const runtimeEnv = (typeof import.meta !== "undefined" && import.meta.env) ? import.meta.env.VITE_SUPABASE_ATENDIMENTO_URL : "";
+  const runtimeEnv = getEnv("VITE_SUPABASE_ATENDIMENTO_URL") || getEnv("SUPABASE_ATENDIMENTO_URL");
   if (runtimeEnv && runtimeEnv.length > 8) {
     return runtimeEnv;
   }
@@ -77,7 +91,7 @@ export function getProtectedAtendimentoEndpoint(): string {
 }
 
 export function getProtectedAtendimentoSecret(): string {
-  const runtimeEnv = (typeof import.meta !== "undefined" && import.meta.env) ? import.meta.env.VITE_SUPABASE_ATENDIMENTO_ANON_KEY : "";
+  const runtimeEnv = getEnv("VITE_SUPABASE_ATENDIMENTO_ANON_KEY") || getEnv("SUPABASE_ATENDIMENTO_ANON_KEY");
   if (runtimeEnv && runtimeEnv.length > 10) {
     return runtimeEnv;
   }

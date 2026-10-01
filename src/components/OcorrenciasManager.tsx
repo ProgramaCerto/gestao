@@ -83,7 +83,7 @@ export const OcorrenciasManager: React.FC<OcorrenciasManagerProps> = ({
 
   // Carregar ocorrências do Supabase
   const loadOcorrencias = useCallback(async () => {
-    if (!isSupabaseConfigured() || !supabase) return;
+    if (!isSupabaseConfigured || !supabase) return;
     setIsLoading(true);
     try {
       const { data, error } = await supabase
@@ -114,7 +114,7 @@ export const OcorrenciasManager: React.FC<OcorrenciasManagerProps> = ({
 
   // Carregar notificações do Supabase
   const loadNotificacoes = useCallback(async () => {
-    if (!isSupabaseConfigured() || !supabase) return;
+    if (!isSupabaseConfigured || !supabase) return;
     setIsLoadingNotifs(true);
     try {
       const { data, error } = await supabase

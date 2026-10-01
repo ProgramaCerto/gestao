@@ -1,6 +1,5 @@
 import express from "express";
 import path from "path";
-import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
 import nodemailer from "nodemailer";
@@ -1521,10 +1520,29 @@ app.post("/api/auth/verify-profile-update-code", async (req, res) => {
   }
 });
 
+// Health check and root API endpoint for monitoring / Vercel verification
+app.get("/api", (req, res) => {
+  res.json({
+    status: "online",
+    name: "Programa Certo API",
+    version: "2026.1",
+    timestamp: new Date().toISOString()
+  });
+});
+
+app.get("/api/health", (req, res) => {
+  res.json({
+    status: "healthy",
+    uptime: process.uptime(),
+    timestamp: new Date().toISOString()
+  });
+});
+
 // Vite Middleware integration for SPA development / production asset serving
 async function startServer() {
   if (process.env.NODE_ENV !== "production") {
     const isHmrDisabled = process.env.DISABLE_HMR === "true";
+    const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: {
         middlewareMode: true,
@@ -1547,4 +1565,10 @@ async function startServer() {
   });
 }
 
-startServer();
+// Export Express app for Vercel Serverless Functions and other serverless runtimes
+export default app;
+
+// Only start standalone HTTP server in non-serverless environments (local dev or traditional container)
+if (!process.env.VERCEL && !process.env.AWS_LAMBDA_FUNCTION_NAME) {
+  startServer();
+}
