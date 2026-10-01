@@ -71,6 +71,7 @@ import { TicketDetailView } from "./components/TicketDetailView";
 import { TicketPdfView } from "./components/TicketPdfView";
 import { TermsOfUseView } from "./components/TermsOfUseView";
 import { DocumentosManager } from "./components/DocumentosManager";
+import { OcorrenciasManager } from "./components/OcorrenciasManager";
 import { TERMS_PLAIN_TEXT_FOR_CLIPBOARD } from "./data/termsOfUse";
 import {
   generateTicketPdf,
@@ -159,7 +160,7 @@ function getInitialRouteInfo() {
   let authMode: "login" | "forgot" = "login";
 
 
-  let activeTab: "dashboard" | "usuarios" | "atendimento" | "documentos" | "perfil" | "termos" = "dashboard";
+  let activeTab: "dashboard" | "usuarios" | "atendimento" | "documentos" | "ocorrencias" | "perfil" | "termos" = "dashboard";
   let courseSlug = "";
   let lessonSlug = "";
   let isViewingCourseInfo = false;
@@ -175,6 +176,8 @@ function getInitialRouteInfo() {
       activeTab = "termos";
     } else if (first === "documentos" || first === "documento" || first === "docs") {
       activeTab = "documentos";
+    } else if (first === "ocorrencias" || first === "ocorrencia" || first === "seguranca") {
+      activeTab = "ocorrencias";
     } else if (first.startsWith("atendimento-") || first.startsWith("central-de-atendimento-")) {
       activeTab = "atendimento";
       const protoPart = first.replace(/^(central-de-)?atendimento-/, "");
@@ -219,8 +222,8 @@ export default function App() {
 
   const initialRoute = getInitialRouteInfo();
 
-  // Navigation: 'dashboard' | 'usuarios' | 'atendimento' | 'documentos' | 'perfil' | 'termos' (restrita aos painéis administrativos)
-  const [activeTab, setActiveTab] = useState<"dashboard" | "usuarios" | "atendimento" | "documentos" | "perfil" | "termos" | "trilhas" | "courses" | "projects" | "lesson-view" | "cursos_gestao">(initialRoute.activeTab);
+  // Navigation: 'dashboard' | 'usuarios' | 'atendimento' | 'documentos' | 'ocorrencias' | 'perfil' | 'termos' (restrita aos painéis administrativos)
+  const [activeTab, setActiveTab] = useState<"dashboard" | "usuarios" | "atendimento" | "documentos" | "ocorrencias" | "perfil" | "termos" | "trilhas" | "courses" | "projects" | "lesson-view" | "cursos_gestao">(initialRoute.activeTab);
 
   // User Role/Account Type State (Exclusive administrator management panel)
   const [accountType, setAccountType] = useState<"estudante" | "instrutor" | "administrador">("administrador");
@@ -1466,6 +1469,7 @@ export default function App() {
       return "/atendimento";
     }
     if (activeTab === "documentos") return "/documentos";
+    if (activeTab === "ocorrencias") return "/ocorrencias";
     if (activeTab === "usuarios") return "/usuarios";
     return "/dashboard";
   };
@@ -1580,6 +1584,10 @@ export default function App() {
     }
     if (clean === "documentos" || clean === "documento" || clean === "docs") {
       setActiveTab("documentos");
+      return;
+    }
+    if (clean === "ocorrencias" || clean === "ocorrencia" || clean === "seguranca") {
+      setActiveTab("ocorrencias");
       return;
     }
 
@@ -2404,6 +2412,7 @@ export default function App() {
             acesso: (u.acesso === "Bloqueado" || u.status_da_conta === "Bloqueado" || u.status === "Bloqueado") ? "Bloqueado" : "Liberado",
             status: (u.acesso === "Bloqueado" || u.status_da_conta === "Bloqueado" || u.status === "Bloqueado") ? "Bloqueado" : "Liberado",
             motivo: u.motivo || "",
+            quantidades_bloqueio: u.quantidades_bloqueio !== undefined ? u.quantidades_bloqueio : null,
             created_at: u.data_do_cadastro ? String(u.data_do_cadastro).split("T")[0] : "2026-07-23"
           };
         });
@@ -4069,6 +4078,10 @@ export default function App() {
           acesso: editUserStatus,
           motivo: editUserStatus === "Bloqueado" ? editUserMotivo.trim() : null
         };
+        if (editUserStatus === "Bloqueado" && editingUser.acesso !== "Bloqueado" && editingUser.status !== "Bloqueado") {
+          const currentCount = typeof editingUser.quantidades_bloqueio === "number" ? editingUser.quantidades_bloqueio : 0;
+          updatePayload.quantidades_bloqueio = currentCount + 1;
+        }
         if (editUserPassword.trim()) {
           updatePayload.senha = scramblePassword(editUserPassword.trim());
         }
@@ -6687,6 +6700,19 @@ export default function App() {
                 <span>DOCUMENTOS</span>
               </button>
 
+              <button
+                type="button"
+                onClick={() => navigateToTab("ocorrencias")}
+                className={`w-full flex items-center gap-3 px-3.5 py-3 rounded-xl font-bold text-sm transition-all text-left cursor-pointer ${
+                  activeTab === "ocorrencias"
+                    ? "bg-[#0b439c] text-white shadow-md shadow-blue-900/10"
+                    : "text-zinc-700 hover:bg-zinc-100"
+                }`}
+              >
+                <ShieldAlert className="w-5 h-5 shrink-0 text-red-500" />
+                <span>OCORRÊNCIAS</span>
+              </button>
+
               <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider px-3 mt-5 mb-2 select-none">
                 Minha Conta
               </p>
@@ -6861,7 +6887,7 @@ export default function App() {
                 <Sparkles className="w-5 h-5 text-amber-500" />
                 Atalhos de Gestão da Plataforma
               </h3>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 <button
                   type="button"
                   onClick={() => navigateToTab("usuarios")}
@@ -6884,12 +6910,22 @@ export default function App() {
 
                 <button
                   type="button"
-                  onClick={() => navigateToTab("termos")}
+                  onClick={() => navigateToTab("documentos")}
                   className="p-5 bg-zinc-50 hover:bg-blue-50/50 border border-zinc-200 hover:border-blue-300 rounded-2xl transition-all text-left space-y-1.5 group cursor-pointer"
                 >
                   <FileText className="w-5 h-5 text-[#0b439c] group-hover:scale-110 transition-transform" />
-                  <h4 className="font-bold text-sm text-zinc-900">Termo de Uso e Privacidade</h4>
-                  <p className="text-xs text-zinc-500">Consultar as políticas e termos institucionais da plataforma Programa Certo.</p>
+                  <h4 className="font-bold text-sm text-zinc-900">Documentos</h4>
+                  <p className="text-xs text-zinc-500">Emissão e controle de folhas timbradas, comunicados e ofícios da instituição.</p>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => navigateToTab("ocorrencias")}
+                  className="p-5 bg-zinc-50 hover:bg-red-50/50 border border-zinc-200 hover:border-red-300 rounded-2xl transition-all text-left space-y-1.5 group cursor-pointer"
+                >
+                  <ShieldAlert className="w-5 h-5 text-red-600 group-hover:scale-110 transition-transform" />
+                  <h4 className="font-bold text-sm text-zinc-900">Ocorrências</h4>
+                  <p className="text-xs text-zinc-500">Auditoria de infrações, tentativas de cópia/impressão e avisos de segurança.</p>
                 </button>
               </div>
             </div>
@@ -11633,6 +11669,10 @@ export default function App() {
           <DocumentosManager allUsers={allUsers} currentAdminName={studentName} currentUserId={user?.user_metadata?.matricula || user?.id} />
         )}
 
+        {activeTab === "ocorrencias" && (
+          <OcorrenciasManager allUsers={allUsers} currentAdminName={studentName} currentUserId={user?.user_metadata?.matricula || user?.id} />
+        )}
+
       </main>
 
           {/* Rodapé no final da página (aparece somente ao rolar até o fim da página) */}
@@ -11783,6 +11823,20 @@ export default function App() {
                 >
                   <FileText className="w-5 h-5" />
                   DOCUMENTOS
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigateToTab("ocorrencias");
+                    setIsMobileMenuOpen(false);
+                  }}
+                  className={`w-full flex items-center gap-3 px-3.5 py-3 rounded-xl font-bold text-sm transition-all text-left cursor-pointer ${
+                    activeTab === "ocorrencias" ? "bg-[#0b439c] text-white shadow-md shadow-blue-900/10" : "text-zinc-700 hover:bg-zinc-100"
+                  }`}
+                >
+                  <ShieldAlert className="w-5 h-5 text-red-500" />
+                  OCORRÊNCIAS
                 </button>
 
                 <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider px-3 mt-5 mb-2 select-none">
