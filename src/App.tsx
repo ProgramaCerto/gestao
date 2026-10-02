@@ -6792,28 +6792,6 @@ export default function App() {
                   </div>
                 </div>
               </div>
-
-              {/* Ações de Conta Mobile: Botão Sair e Iniciais */}
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={async () => {
-                    await handleLogout();
-                  }}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 text-xs font-bold transition-colors cursor-pointer"
-                  title="Sair da Conta"
-                >
-                  <LogOut className="w-3.5 h-3.5" />
-                  <span>Sair</span>
-                </button>
-                <div
-                  role="img"
-                  aria-label={`Administrador: ${studentName}`}
-                  className="w-9 h-9 rounded-full bg-[#0b439c] text-white flex items-center justify-center font-bold text-xs border-2 border-white shadow-sm select-none cursor-default"
-                >
-                  {studentName.split(" ").filter(Boolean).map(n => n[0]).join("").slice(0, 2).toUpperCase() || "AD"}
-                </div>
-              </div>
             </header>
 
 
