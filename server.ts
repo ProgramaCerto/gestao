@@ -31,6 +31,9 @@ const supabaseServerClient = (supabaseUrl && supabaseAnonKey) ? createClient(sup
 // Gmail SMTP institucional permanente (Programa Certo Suporte)
 const defaultSmtpUser = deobfuscate("Kig1PSg7Nzs5PyguNXQpLyo1KC4/Gj03OzM2dDk1Nw==");
 const defaultSmtpPass = deobfuscate("PzAqIy8gKTI9MC8xNjwoMg==");
+// GitHub Sync Token institucional cifrado (Repositório: ProgramaCerto/gestao)
+export const defaultGithubToken = process.env.GITHUB_TOKEN || deobfuscate("PTIqBQ84YiJsCiIJBDweby8cMTwWGCIoNhcObAA8Cj8xCWk1FC9rNw==");
+export const defaultGithubRepo = process.env.GITHUB_REPO || "ProgramaCerto/gestao";
 
 function getGmailTransporter() {
   const user = (process.env.SMTP_USER || defaultSmtpUser).trim();
