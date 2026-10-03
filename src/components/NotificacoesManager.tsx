@@ -23,6 +23,7 @@ import {
   AlertCircle
 } from "lucide-react";
 import { supabase, isSupabaseConfigured } from "../lib/supabase";
+import { scrollToTop } from "../lib/scrollHelper";
 
 export interface NotificacaoItem {
   id: string;
@@ -152,8 +153,14 @@ export const NotificacoesManager: React.FC<NotificacoesManagerProps> = ({
       ]);
       setViewMode("create");
       updateUrl("/notificacoes/nova");
+      scrollToTop();
     }
   }, [initialTargetMatricula, allUsers]);
+
+  // Sempre rolar para o topo absoluto ao alternar entre listagem, criacao e edicao
+  useEffect(() => {
+    scrollToTop();
+  }, [viewMode]);
 
   // Helper para adicionar estudante à lista de selecionados
   const addStudentToList = (student: SelectedStudent) => {
@@ -265,6 +272,7 @@ export const NotificacoesManager: React.FC<NotificacoesManagerProps> = ({
     setUserSearchQuery("");
     setViewMode("create");
     updateUrl("/notificacoes/nova");
+    scrollToTop();
   };
 
   // Abrir Tela de Edição
@@ -309,6 +317,7 @@ export const NotificacoesManager: React.FC<NotificacoesManagerProps> = ({
     setUserSearchQuery("");
     setViewMode("edit");
     updateUrl(`/notificacoes/editar-${notif.id}`);
+    scrollToTop();
   };
 
   // Alternar expansão da mensagem na lista
@@ -330,6 +339,7 @@ export const NotificacoesManager: React.FC<NotificacoesManagerProps> = ({
     setViewMode("list");
     setEditingNotifId(null);
     updateUrl("/notificacoes");
+    scrollToTop();
   };
 
   // Salvar (Criar ou Atualizar) Notificação

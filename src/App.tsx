@@ -95,6 +95,7 @@ import { supabase, isSupabaseConfigured } from "./lib/supabase";
 import { supabaseAtendimento, isSupabaseAtendimentoConfigured } from "./lib/supabaseAtendimento";
 import { scramblePassword, descramblePassword, passwordsMatch } from "./lib/passwordCipher";
 import { User as SupabaseUser } from "@supabase/supabase-js";
+import { scrollToTop as scrollHelperScrollToTop } from "./lib/scrollHelper";
 
 export interface AtendimentoItem {
   id: string;
@@ -1173,17 +1174,7 @@ export default function App() {
 
   // Função utilitária para rolar a tela e containers principais até o topo absoluto
   const scrollToTop = useCallback(() => {
-    if (typeof window !== "undefined") {
-      window.scrollTo({ top: 0, left: 0, behavior: "instant" });
-      document.documentElement.scrollTop = 0;
-      document.body.scrollTop = 0;
-      const mainScrollContainer = document.getElementById("main-scroll-container");
-      if (mainScrollContainer) mainScrollContainer.scrollTop = 0;
-      const mainContainer = document.querySelector("main");
-      if (mainContainer) mainContainer.scrollTop = 0;
-      const rootElement = document.getElementById("root");
-      if (rootElement) rootElement.scrollTop = 0;
-    }
+    scrollHelperScrollToTop();
   }, []);
 
   // Garante que toda transição de tela, página, curso, aula ou modo de auth vá sempre para o topo
@@ -1201,6 +1192,9 @@ export default function App() {
     selectedTicketForDetail?.id,
     viewingTicketDetailProtocol,
     viewingTicketPdfProtocol,
+    editingUser?.id,
+    isCreatingUserPage,
+    targetMatriculaForNotif,
     scrollToTop
   ]);
 

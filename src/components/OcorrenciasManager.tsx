@@ -20,6 +20,7 @@ import {
   ArrowLeft
 } from "lucide-react";
 import { supabase, isSupabaseConfigured } from "../lib/supabase";
+import { scrollToTop } from "../lib/scrollHelper";
 
 export interface OcorrenciaItem {
   id: string;
@@ -90,6 +91,11 @@ export const OcorrenciasManager: React.FC<OcorrenciasManagerProps> = ({
     loadOcorrencias();
   }, [loadOcorrencias]);
 
+  // Sempre rolar para o topo absoluto ao alternar entre listagem e detalhe da ocorrencia
+  useEffect(() => {
+    scrollToTop();
+  }, [viewMode]);
+
   // Atualizar status da ocorrência no Supabase
   const handleUpdateStatus = async (id: string, newStatus: string) => {
     if (!supabase) return;
@@ -143,12 +149,14 @@ export const OcorrenciasManager: React.FC<OcorrenciasManagerProps> = ({
     setSelectedOcorrencia(ocorrencia);
     setViewMode("detail");
     updateUrl(`/ocorrencias/visualizar-${ocorrencia.id}`);
+    scrollToTop();
   };
 
   const handleBackToList = () => {
     setViewMode("list");
     setSelectedOcorrencia(null);
     updateUrl("/ocorrencias");
+    scrollToTop();
   };
 
   // Redirecionar para emitir notificação para este aluno
