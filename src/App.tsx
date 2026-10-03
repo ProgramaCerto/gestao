@@ -168,6 +168,7 @@ function getInitialRouteInfo() {
   let isViewingCourseInfo = false;
   let pdfProtocol = "";
   let detailTicketProtocol = "";
+  let initialUserMatricula = "";
 
   const segments = raw.split("/").filter(Boolean);
   if (segments.length > 0) {
@@ -204,15 +205,37 @@ function getInitialRouteInfo() {
       } else if (segments.length >= 2) {
         detailTicketProtocol = segments[1];
       }
-    } else if (first === "usuarios" || first === "users" || first === "controle-usuarios") {
+    } else if (
+      first === "usuarios" ||
+      first === "users" ||
+      first === "controle-usuarios" ||
+      first.startsWith("usuarios-") ||
+      first.startsWith("visualizar-") ||
+      first.startsWith("usuarios/visualizar-")
+    ) {
       activeTab = "usuarios";
+      if (first.startsWith("visualizar-")) {
+        initialUserMatricula = first.replace(/^visualizar-/, "");
+      } else if (first.startsWith("usuarios-visualizar-")) {
+        initialUserMatricula = first.replace(/^usuarios-visualizar-/, "");
+      } else if (first.startsWith("usuarios-")) {
+        initialUserMatricula = first.replace(/^usuarios-/, "");
+      } else if (segments.length >= 2) {
+        if (segments[1].startsWith("visualizar-")) {
+          initialUserMatricula = segments[1].replace(/^visualizar-/, "");
+        } else if (segments[1] === "visualizar" && segments.length >= 3) {
+          initialUserMatricula = segments[2];
+        } else {
+          initialUserMatricula = segments[1];
+        }
+      }
     } else {
       // Qualquer outro link, subcaminho ou parâmetro sempre cai no dashboard (Darkborg)
       activeTab = "dashboard";
     }
   }
 
-  return { authMode, activeTab, courseSlug, lessonSlug, isViewingCourseInfo, pdfProtocol, detailTicketProtocol };
+  return { authMode, activeTab, courseSlug, lessonSlug, isViewingCourseInfo, pdfProtocol, detailTicketProtocol, initialUserMatricula };
 }
 
 export default function App() {
@@ -1476,7 +1499,13 @@ export default function App() {
     if (activeTab === "documentos") return "/documentos";
     if (activeTab === "ocorrencias") return "/ocorrencias";
     if (activeTab === "notificacoes") return "/notificacoes";
-    if (activeTab === "usuarios") return "/usuarios";
+    if (activeTab === "usuarios") {
+      if (editingUser) {
+        const mat = extractMatricula(editingUser.matricula || editingUser.id || "", allUsers);
+        return `/usuarios/visualizar-${mat}`;
+      }
+      return "/usuarios";
+    }
     return "/dashboard";
   };
 
@@ -1584,8 +1613,39 @@ export default function App() {
       setActiveTab("termos");
       return;
     }
-    if (clean === "usuarios" || clean === "users" || clean === "controle-usuarios") {
+    if (
+      clean === "usuarios" ||
+      clean === "users" ||
+      clean === "controle-usuarios" ||
+      clean.startsWith("usuarios-") ||
+      clean.startsWith("usuarios/") ||
+      clean.startsWith("visualizar-")
+    ) {
       setActiveTab("usuarios");
+      let mat = "";
+      if (clean.startsWith("visualizar-")) {
+        mat = clean.replace(/^visualizar-/, "");
+      } else if (clean.startsWith("usuarios/visualizar-")) {
+        mat = clean.replace(/^usuarios\/visualizar-/, "");
+      } else if (clean.startsWith("usuarios/visualizar/")) {
+        mat = clean.replace(/^usuarios\/visualizar\//, "");
+      } else if (clean.startsWith("usuarios-visualizar-")) {
+        mat = clean.replace(/^usuarios-visualizar-/, "");
+      } else if (clean.startsWith("usuarios-")) {
+        mat = clean.replace(/^usuarios-/, "");
+      }
+      if (mat && allUsers.length > 0) {
+        const found = allUsers.find(
+          (u: any) =>
+            extractMatricula(u.matricula || u.id, allUsers).toLowerCase() === mat.toLowerCase() ||
+            String(u.matricula || u.id).trim().toLowerCase() === mat.toLowerCase()
+        );
+        if (found) {
+          handleOpenEditUser(found);
+          return;
+        }
+      }
+      setEditingUser(null);
       return;
     }
     if (clean === "documentos" || clean === "documento" || clean === "docs") {
@@ -3953,6 +4013,20 @@ export default function App() {
     }
   };
 
+  // Efeito para abrir usuario diretamente se acessado pela URL (/usuarios/visualizar-:matricula)
+  useEffect(() => {
+    if (initialRoute.initialUserMatricula && allUsers.length > 0 && !editingUser) {
+      const mat = initialRoute.initialUserMatricula.trim().toLowerCase();
+      const found = allUsers.find((u: any) => {
+        const uMat = extractMatricula(u.matricula || u.id, allUsers).toLowerCase();
+        return uMat === mat || String(u.matricula || u.id).trim().toLowerCase() === mat;
+      });
+      if (found) {
+        handleOpenEditUser(found);
+      }
+    }
+  }, [allUsers, initialRoute.initialUserMatricula]);
+
   const handleOpenEditUser = async (userItem: any, fromAtendimento: boolean = false) => {
     setIsCreatingUserPage(false);
     setEditingUser(userItem);
@@ -3968,6 +4042,11 @@ export default function App() {
     setEditUserStatus(isBlocked ? "Bloqueado" : "Liberado");
     setEditUserMotivo(userItem.motivo || "");
     scrollToTop();
+
+    const targetMat = extractMatricula(userItem.matricula || userItem.id, allUsers);
+    if (typeof window !== "undefined") {
+      window.history.pushState({}, "", `/usuarios/visualizar-${targetMat}`);
+    }
 
     const isCurrentLogged = userItem.id === user?.id || (user?.email && userItem.email && userItem.email.toLowerCase() === user.email.toLowerCase());
     const initLessons = isCurrentLogged ? stats.completedLessons.length : 0;
@@ -8379,6 +8458,9 @@ export default function App() {
                       const cameFromAtend = editingUserFromAtendimento;
                       setEditingUser(null);
                       setEditingUserFromAtendimento(false);
+                      if (typeof window !== "undefined") {
+                        window.history.pushState({}, "", cameFromAtend ? "/atendimento" : "/usuarios");
+                      }
                       if (cameFromAtend) {
                         setActiveTab("atendimento");
                       }
@@ -10409,6 +10491,9 @@ export default function App() {
                     onClick={() => {
                       setEditingUser(null);
                       setEditingUserFromAtendimento(false);
+                      if (typeof window !== "undefined") {
+                        window.history.pushState({}, "", "/atendimento");
+                      }
                       scrollToTop();
                     }}
                     className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white hover:bg-zinc-100 border border-zinc-200 text-zinc-700 font-bold text-xs transition-all shadow-2xs cursor-pointer"
