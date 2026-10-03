@@ -6684,17 +6684,15 @@ export default function App() {
       {/* Camada Base da Página (Inativa e travada quando qualquer camada superior/modal/menu lateral está aberta) */}
       <div
         id="background-page-layer"
-        className={`flex-1 flex flex-col md:flex-row w-full h-full overflow-hidden ${
+        className={`flex-1 flex flex-col md:flex-row w-full h-full min-h-0 overflow-hidden ${
           isAnyModalOpen ? "pointer-events-none select-none" : ""
         }`}
         aria-hidden={isAnyModalOpen ? true : undefined}
         inert={isAnyModalOpen ? true : undefined}
       >
-        {/* Barra Lateral Fixa no Desktop (Camada com rolagem própria e isolada) */}
+        {/* Barra Lateral Fixa no Desktop (Camada com rolagem fluida e scrollbar fina) */}
         <aside
-          onWheel={(e) => e.stopPropagation()}
-          onTouchMove={(e) => e.stopPropagation()}
-          className="hidden md:flex md:w-[280px] lg:w-[300px] bg-white border-r border-zinc-200 flex-col shrink-0 h-full z-30 overflow-hidden"
+          className="hidden md:flex md:w-[280px] lg:w-[300px] bg-white border-r border-zinc-200 flex-col shrink-0 h-full min-h-0 max-h-screen z-30"
         >
             {/* Topo da Barra Lateral: Logo Programa Certo (Apenas visual, não clicável) */}
             <div className="p-5 border-b border-zinc-200 flex items-center gap-3 bg-zinc-50/70 select-none cursor-default shrink-0">
@@ -6730,8 +6728,8 @@ export default function App() {
               </div>
             </div>
 
-            {/* Menu de Navegação Lateral (Rolagem exclusiva da barra lateral) */}
-            <div className="p-4 space-y-1.5 flex-1 overflow-y-auto overscroll-contain">
+            {/* Menu de Navegação Lateral (Rolagem fluida para cima e para baixo com padding inferior amplo) */}
+            <div className="p-4 pb-20 space-y-1.5 flex-1 min-h-0 overflow-y-auto overscroll-contain [scrollbar-width:thin] [scrollbar-color:#cbd5e1_transparent] [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-zinc-300 hover:[&::-webkit-scrollbar-thumb]:bg-zinc-400 [&::-webkit-scrollbar-track]:bg-transparent">
               <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider px-3 mb-2 select-none">
                 Gestão e Administração
               </p>
@@ -11832,9 +11830,7 @@ export default function App() {
               exit={{ x: "-100%" }}
               transition={{ type: "tween", duration: 0.18, ease: "easeOut" }}
               onClick={(e) => e.stopPropagation()}
-              onWheel={(e) => e.stopPropagation()}
-              onTouchMove={(e) => e.stopPropagation()}
-              className="fixed top-0 left-0 bottom-0 w-[290px] sm:w-[320px] bg-white z-10 shadow-2xl flex flex-col border-r border-zinc-200 overscroll-contain"
+              className="fixed top-0 left-0 bottom-0 w-[290px] sm:w-[320px] bg-white z-10 shadow-2xl flex flex-col border-r border-zinc-200 h-full min-h-0 max-h-screen"
             >
               <div className="p-5 border-b border-zinc-200 flex items-center justify-between bg-zinc-50 shrink-0">
                 <div className="flex items-center gap-2.5 select-none cursor-default">
@@ -11878,7 +11874,7 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="p-4 space-y-1.5 flex-1 overflow-y-auto overscroll-contain">
+              <div className="p-4 pb-24 space-y-1.5 flex-1 min-h-0 overflow-y-auto overscroll-contain [scrollbar-width:thin] [scrollbar-color:#cbd5e1_transparent] [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-zinc-300 [&::-webkit-scrollbar-track]:bg-transparent">
                 <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider px-3 mb-2 select-none">
                   Gestão e Administração
                 </p>
