@@ -6719,7 +6719,7 @@ export default function App() {
                     : "text-zinc-700 hover:bg-zinc-100"
                 }`}
               >
-                <ShieldAlert className="w-5 h-5 shrink-0 text-red-500" />
+                <ShieldAlert className="w-5 h-5 shrink-0" />
                 <span>OCORRÊNCIAS</span>
               </button>
 
@@ -6735,7 +6735,7 @@ export default function App() {
                     : "text-zinc-700 hover:bg-zinc-100"
                 }`}
               >
-                <Bell className="w-5 h-5 shrink-0 text-amber-500" />
+                <Bell className="w-5 h-5 shrink-0" />
                 <span>NOTIFICAÇÕES</span>
               </button>
 
@@ -11869,7 +11869,7 @@ export default function App() {
                     activeTab === "ocorrencias" ? "bg-[#0b439c] text-white shadow-md shadow-blue-900/10" : "text-zinc-700 hover:bg-zinc-100"
                   }`}
                 >
-                  <ShieldAlert className="w-5 h-5 text-red-500" />
+                  <ShieldAlert className="w-5 h-5" />
                   OCORRÊNCIAS
                 </button>
 
@@ -11884,7 +11884,7 @@ export default function App() {
                     activeTab === "notificacoes" ? "bg-[#0b439c] text-white shadow-md shadow-blue-900/10" : "text-zinc-700 hover:bg-zinc-100"
                   }`}
                 >
-                  <Bell className="w-5 h-5 text-amber-500" />
+                  <Bell className="w-5 h-5" />
                   NOTIFICAÇÕES
                 </button>
 

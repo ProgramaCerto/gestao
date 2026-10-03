@@ -9,14 +9,13 @@ import {
   ArrowLeft,
   Users,
   User,
-  ShieldAlert,
-  Info,
   CheckCircle2,
   AlertTriangle,
   Loader2,
   Calendar,
-  Sparkles,
-  FileText
+  FileText,
+  X,
+  Check
 } from "lucide-react";
 import { supabase, isSupabaseConfigured } from "../lib/supabase";
 
@@ -56,8 +55,13 @@ export const NotificacoesManager: React.FC<NotificacoesManagerProps> = ({
   // Formulário de Criação (Tela Inteira)
   const [isSendToAll, setIsSendToAll] = useState(!initialTargetMatricula);
   const [targetMatricula, setTargetMatricula] = useState(initialTargetMatricula || "");
-  const [selectedUserFilter, setSelectedUserFilter] = useState("");
+  const [userSearchQuery, setUserSearchQuery] = useState("");
+  const [manualMatriculaInput, setManualMatriculaInput] = useState(initialTargetMatricula || "");
+
+  // Tipos de comunicado: "Aviso Geral" | "Segurança" | "Comunicado Oficial" | "Suporte" | "Outro"
   const [tipo, setTipo] = useState<string>("Aviso Geral");
+  const [customTipo, setCustomTipo] = useState<string>("");
+
   const [titulo, setTitulo] = useState("");
   const [mensagem, setMensagem] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -84,7 +88,7 @@ export const NotificacoesManager: React.FC<NotificacoesManagerProps> = ({
             titulo: row.titulo || "Comunicado",
             mensagem: row.mensagem || "",
             destinatarios: row.destinatarios || "todos",
-            tipo: row.tipo || "Geral",
+            tipo: row.tipo || "Aviso Geral",
             criado_em: row.criado_em || new Date().toISOString()
           }))
         );
@@ -100,20 +104,31 @@ export const NotificacoesManager: React.FC<NotificacoesManagerProps> = ({
     loadNotificacoes();
   }, [loadNotificacoes]);
 
-  // Alunos filtrados para sugestão/autocomplete no envio individual
+  // Aluno atualmente selecionado para notificação individual
+  const selectedStudent = useMemo(() => {
+    if (isSendToAll || !targetMatricula) return null;
+    return allUsers.find(
+      (u: any) => String(u.matricula || u.id).trim() === targetMatricula.trim()
+    ) || null;
+  }, [allUsers, isSendToAll, targetMatricula]);
+
+  // Alunos filtrados pela busca
   const matchingStudents = useMemo(() => {
     if (!allUsers || allUsers.length === 0) return [];
-    const search = selectedUserFilter.trim().toLowerCase();
-    return allUsers.filter((u: any) => {
-      const role = String(u.role || u.tipo || "").toLowerCase();
-      // Não sugerir administradores caso queira
-      const nome = String(u.nome || u.name || "").toLowerCase();
-      const matricula = String(u.matricula || u.id || "").toLowerCase();
-      const email = String(u.email || "").toLowerCase();
-      if (!search) return true;
-      return nome.includes(search) || matricula.includes(search) || email.includes(search);
-    }).slice(0, 10);
-  }, [allUsers, selectedUserFilter]);
+    const query = userSearchQuery.trim().toLowerCase();
+    if (!query) {
+      // Retorna os primeiros 6 para exibição rápida inicial
+      return allUsers.slice(0, 6);
+    }
+    return allUsers
+      .filter((u: any) => {
+        const nome = String(u.nome || u.name || "").toLowerCase();
+        const matricula = String(u.matricula || u.id || "").toLowerCase();
+        const email = String(u.email || "").toLowerCase();
+        return nome.includes(query) || matricula.includes(query) || email.includes(query);
+      })
+      .slice(0, 10);
+  }, [allUsers, userSearchQuery]);
 
   // Enviar Notificação (Tela Inteira)
   const handleSendNotification = async (e: React.FormEvent) => {
@@ -127,14 +142,22 @@ export const NotificacoesManager: React.FC<NotificacoesManagerProps> = ({
       return;
     }
 
-    const finalDestinatarios = isSendToAll ? "todos" : targetMatricula.trim();
+    const finalDestinatarios = isSendToAll
+      ? "todos"
+      : targetMatricula.trim() || manualMatriculaInput.trim();
+
     if (!finalDestinatarios) {
       setFeedback({
         type: "error",
-        text: "Informe a matrícula do estudante de destino ou marque para todos os estudantes."
+        text: "Informe a matrícula do estudante ou selecione um aluno na busca."
       });
       return;
     }
+
+    const finalTipo =
+      tipo === "Outro"
+        ? customTipo.trim() || "Outro"
+        : tipo.trim();
 
     setIsSubmitting(true);
     setFeedback(null);
@@ -146,7 +169,7 @@ export const NotificacoesManager: React.FC<NotificacoesManagerProps> = ({
         titulo: titulo.trim(),
         mensagem: mensagem.trim(),
         destinatarios: finalDestinatarios,
-        tipo: tipo.trim(),
+        tipo: finalTipo,
         criado_em: new Date().toISOString()
       };
 
@@ -163,6 +186,10 @@ export const NotificacoesManager: React.FC<NotificacoesManagerProps> = ({
         setTitulo("");
         setMensagem("");
         setTargetMatricula("");
+        setManualMatriculaInput("");
+        setUserSearchQuery("");
+        setTipo("Aviso Geral");
+        setCustomTipo("");
         setIsSendToAll(false);
         setFeedback(null);
         setViewMode("list");
@@ -214,13 +241,12 @@ export const NotificacoesManager: React.FC<NotificacoesManagerProps> = ({
     }
   };
 
-  // Estatísticas
+  // Estatísticas (Apenas Total, Transmissão Geral e Individuais)
   const stats = useMemo(() => {
     const total = notificacoes.length;
     const paraTodos = notificacoes.filter((n) => (n.destinatarios || "").toLowerCase() === "todos").length;
     const individuais = total - paraTodos;
-    const seguranca = notificacoes.filter((n) => (n.tipo || "").toLowerCase().includes("segurança") || (n.tipo || "").toLowerCase().includes("seguranca")).length;
-    return { total, paraTodos, individuais, seguranca };
+    return { total, paraTodos, individuais };
   }, [notificacoes]);
 
   // Lista filtrada
@@ -238,7 +264,6 @@ export const NotificacoesManager: React.FC<NotificacoesManagerProps> = ({
       if (filterTipo === "todos") return true;
       if (filterTipo === "geral") return (item.destinatarios || "").toLowerCase() === "todos";
       if (filterTipo === "individual") return (item.destinatarios || "").toLowerCase() !== "todos";
-      if (filterTipo === "seguranca") return (item.tipo || "").toLowerCase().includes("seguran");
       return true;
     });
   }, [notificacoes, searchTerm, filterTipo]);
@@ -255,10 +280,10 @@ export const NotificacoesManager: React.FC<NotificacoesManagerProps> = ({
     if (t.includes("suporte") || t.includes("atendimento")) {
       return "bg-purple-100 text-purple-800 border-purple-200";
     }
-    if (t.includes("acadêm") || t.includes("academ")) {
-      return "bg-emerald-100 text-emerald-800 border-emerald-200";
+    if (t.includes("comunicado")) {
+      return "bg-blue-100 text-[#0b439c] border-blue-200";
     }
-    return "bg-blue-100 text-[#0b439c] border-blue-200";
+    return "bg-zinc-100 text-zinc-800 border-zinc-200";
   };
 
   return (
@@ -271,15 +296,15 @@ export const NotificacoesManager: React.FC<NotificacoesManagerProps> = ({
           {/* Cabeçalho da Aba Notificações */}
           <div className="bg-white border border-zinc-200/80 rounded-2xl p-6 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div className="flex items-center gap-3.5">
-              <div className="w-12 h-12 rounded-2xl bg-amber-50 border border-amber-200 flex items-center justify-center shrink-0 shadow-2xs">
-                <Bell className="w-6 h-6 text-amber-600" />
+              <div className="w-12 h-12 rounded-2xl bg-zinc-100 border border-zinc-200 flex items-center justify-center shrink-0 shadow-2xs">
+                <Bell className="w-6 h-6 text-zinc-700" />
               </div>
               <div>
                 <div className="flex items-center gap-2">
                   <h1 className="text-xl font-black text-zinc-900 tracking-tight">
                     Central de Notificações
                   </h1>
-                  <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-amber-100 text-amber-800">
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-blue-100 text-[#0b439c]">
                     Comunicados & Avisos
                   </span>
                 </div>
@@ -314,8 +339,8 @@ export const NotificacoesManager: React.FC<NotificacoesManagerProps> = ({
             </div>
           </div>
 
-          {/* Cards de Métricas */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          {/* Cards de Métricas (Apenas 3 cards, sem o card de Avisos de Segurança) */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div className="bg-white border border-zinc-200/80 rounded-2xl p-4 shadow-xs flex items-center justify-between">
               <div>
                 <p className="text-[11px] font-bold text-zinc-500 uppercase tracking-wider">Total de Envios</p>
@@ -345,16 +370,6 @@ export const NotificacoesManager: React.FC<NotificacoesManagerProps> = ({
                 <User className="w-5 h-5" />
               </div>
             </div>
-
-            <div className="bg-white border border-zinc-200/80 rounded-2xl p-4 shadow-xs flex items-center justify-between">
-              <div>
-                <p className="text-[11px] font-bold text-red-600 uppercase tracking-wider">Avisos de Segurança</p>
-                <p className="text-2xl font-black text-red-600 mt-1">{stats.seguranca}</p>
-              </div>
-              <div className="w-10 h-10 rounded-xl bg-red-50 text-red-600 flex items-center justify-center">
-                <ShieldAlert className="w-5 h-5" />
-              </div>
-            </div>
           </div>
 
           {/* Filtros e Busca */}
@@ -373,9 +388,8 @@ export const NotificacoesManager: React.FC<NotificacoesManagerProps> = ({
             <div className="flex items-center gap-1.5 bg-zinc-100 p-1 rounded-xl self-stretch sm:self-auto overflow-x-auto">
               {[
                 { id: "todos", label: "Todas" },
-                { id: "geral", label: "Para Todos" },
-                { id: "individual", label: "Individuais" },
-                { id: "seguranca", label: "Segurança" }
+                { id: "geral", label: "Transmissão Geral" },
+                { id: "individual", label: "Individuais" }
               ].map((tab) => (
                 <button
                   key={tab.id}
@@ -397,7 +411,7 @@ export const NotificacoesManager: React.FC<NotificacoesManagerProps> = ({
           <div className="bg-white border border-zinc-200/80 rounded-2xl shadow-xs overflow-hidden">
             {filteredNotificacoes.length === 0 ? (
               <div className="p-16 text-center space-y-4">
-                <div className="w-14 h-14 rounded-3xl bg-amber-50 text-amber-600 flex items-center justify-center mx-auto border border-amber-200/60 shadow-2xs">
+                <div className="w-14 h-14 rounded-3xl bg-zinc-100 text-zinc-500 flex items-center justify-center mx-auto border border-zinc-200/60 shadow-2xs">
                   <Bell className="w-7 h-7" />
                 </div>
                 <div className="space-y-1">
@@ -407,7 +421,7 @@ export const NotificacoesManager: React.FC<NotificacoesManagerProps> = ({
                   <p className="text-xs text-zinc-500 max-w-md mx-auto">
                     {searchTerm
                       ? `Não encontramos comunicados correspondentes à pesquisa "${searchTerm}".`
-                      : "Envie comunicados gerais ou alertas para estudantes específicos sobre materiais, ocorrências e atualizações."}
+                      : "Envie comunicados gerais ou alertas para estudantes específicos sobre materiais, ocorrências e avisos acadêmicos."}
                   </p>
                 </div>
                 <button
@@ -507,12 +521,12 @@ export const NotificacoesManager: React.FC<NotificacoesManagerProps> = ({
       )}
 
       {/* ========================================================================= */}
-      {/* TELA B: NOVA NOTIFICAÇÃO (EM TELA INTEIRA - SEM SEGUNDA CAMADA / SEM MODAL) */}
+      {/* TELA B: NOVA NOTIFICAÇÃO (EM TELA INTEIRA - SEM SEGUNDA CAMADA / SEM PREVIEW) */}
       {/* ========================================================================= */}
       {viewMode === "create" && (
         <div className="bg-white rounded-3xl border border-zinc-200/80 shadow-sm overflow-hidden animate-in fade-in duration-150">
-          {/* Cabeçalho da Tela de Emissão */}
-          <div className="p-6 border-b border-zinc-200 flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-zinc-50/70">
+          {/* Cabeçalho da Tela de Emissão (Sem badge de emissor) */}
+          <div className="p-6 border-b border-zinc-200 flex items-center justify-between gap-4 bg-zinc-50/70">
             <div className="flex items-center gap-3">
               <button
                 type="button"
@@ -534,12 +548,6 @@ export const NotificacoesManager: React.FC<NotificacoesManagerProps> = ({
                 </p>
               </div>
             </div>
-
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-bold text-zinc-500 bg-white px-3 py-1.5 rounded-xl border border-zinc-200">
-                Emissor: <strong className="text-zinc-800">{currentAdminName}</strong>
-              </span>
-            </div>
           </div>
 
           {/* Feedback de envio */}
@@ -560,237 +568,259 @@ export const NotificacoesManager: React.FC<NotificacoesManagerProps> = ({
             </div>
           )}
 
-          {/* Formulário em Tela Cheia */}
-          <form onSubmit={handleSendNotification} className="p-6 sm:p-8 space-y-8">
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-              {/* Coluna Esquerda: Configurações do Envio (2 colunas) */}
-              <div className="lg:col-span-2 space-y-6">
-                {/* 1. Destinatários */}
-                <div className="bg-zinc-50/70 border border-zinc-200 rounded-2xl p-5 space-y-4">
-                  <div className="flex items-center justify-between">
-                    <label className="text-xs font-black uppercase tracking-wider text-zinc-700 flex items-center gap-1.5">
-                      <Users className="w-4 h-4 text-[#0b439c]" />
-                      Destinatários da Notificação
-                    </label>
+          {/* Formulário em Tela Cheia (Layout Amplo e Direto) */}
+          <form onSubmit={handleSendNotification} className="p-6 sm:p-8 space-y-7 max-w-5xl mx-auto">
+            {/* 1. Destinatários da Notificação */}
+            <div className="bg-zinc-50/70 border border-zinc-200 rounded-2xl p-5 sm:p-6 space-y-4">
+              <label className="text-xs font-black uppercase tracking-wider text-zinc-700 flex items-center gap-1.5">
+                <Users className="w-4 h-4 text-[#0b439c]" />
+                Destinatários da Notificação
+              </label>
+
+              {/* Seleção rápida: Todos vs Aluno Específico */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsSendToAll(true);
+                    setTargetMatricula("");
+                    setManualMatriculaInput("");
+                  }}
+                  className={`p-4 rounded-xl border text-left transition-all flex items-start gap-3 cursor-pointer ${
+                    isSendToAll
+                      ? "bg-blue-50/80 border-[#0b439c] text-blue-900 shadow-xs"
+                      : "bg-white border-zinc-200 text-zinc-700 hover:bg-zinc-100"
+                  }`}
+                >
+                  <div
+                    className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 mt-0.5 ${
+                      isSendToAll ? "border-[#0b439c] bg-[#0b439c]" : "border-zinc-300"
+                    }`}
+                  >
+                    {isSendToAll && <div className="w-2 h-2 rounded-full bg-white" />}
                   </div>
-
-                  {/* Seleção rápida: Todos vs Aluno Específico */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <button
-                      type="button"
-                      onClick={() => setIsSendToAll(true)}
-                      className={`p-4 rounded-xl border text-left transition-all flex items-start gap-3 cursor-pointer ${
-                        isSendToAll
-                          ? "bg-blue-50/80 border-[#0b439c] text-blue-900 shadow-xs"
-                          : "bg-white border-zinc-200 text-zinc-700 hover:bg-zinc-100"
-                      }`}
-                    >
-                      <div
-                        className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 mt-0.5 ${
-                          isSendToAll ? "border-[#0b439c] bg-[#0b439c]" : "border-zinc-300"
-                        }`}
-                      >
-                        {isSendToAll && <div className="w-2 h-2 rounded-full bg-white" />}
-                      </div>
-                      <div>
-                        <strong className="block text-xs font-bold">Transmissão Geral (Todos)</strong>
-                        <span className="text-[11px] text-zinc-500">
-                          Todos os estudantes ativos receberão este comunicado na tela.
-                        </span>
-                      </div>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => setIsSendToAll(false)}
-                      className={`p-4 rounded-xl border text-left transition-all flex items-start gap-3 cursor-pointer ${
-                        !isSendToAll
-                          ? "bg-blue-50/80 border-[#0b439c] text-blue-900 shadow-xs"
-                          : "bg-white border-zinc-200 text-zinc-700 hover:bg-zinc-100"
-                      }`}
-                    >
-                      <div
-                        className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 mt-0.5 ${
-                          !isSendToAll ? "border-[#0b439c] bg-[#0b439c]" : "border-zinc-300"
-                        }`}
-                      >
-                        {!isSendToAll && <div className="w-2 h-2 rounded-full bg-white" />}
-                      </div>
-                      <div>
-                        <strong className="block text-xs font-bold">Estudante Específico</strong>
-                        <span className="text-[11px] text-zinc-500">
-                          Direcionar a notificação para uma matrícula individual.
-                        </span>
-                      </div>
-                    </button>
+                  <div>
+                    <strong className="block text-xs font-bold">Transmissão Geral (Todos)</strong>
+                    <span className="text-[11px] text-zinc-500">
+                      Todos os estudantes ativos receberão este comunicado na tela.
+                    </span>
                   </div>
+                </button>
 
-                  {/* Campo de Matrícula (quando não for todos) */}
-                  {!isSendToAll && (
-                    <div className="pt-2 space-y-3">
+                <button
+                  type="button"
+                  onClick={() => setIsSendToAll(false)}
+                  className={`p-4 rounded-xl border text-left transition-all flex items-start gap-3 cursor-pointer ${
+                    !isSendToAll
+                      ? "bg-blue-50/80 border-[#0b439c] text-blue-900 shadow-xs"
+                      : "bg-white border-zinc-200 text-zinc-700 hover:bg-zinc-100"
+                  }`}
+                >
+                  <div
+                    className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 mt-0.5 ${
+                      !isSendToAll ? "border-[#0b439c] bg-[#0b439c]" : "border-zinc-300"
+                    }`}
+                  >
+                    {!isSendToAll && <div className="w-2 h-2 rounded-full bg-white" />}
+                  </div>
+                  <div>
+                    <strong className="block text-xs font-bold">Estudante Específico</strong>
+                    <span className="text-[11px] text-zinc-500">
+                      Direcionar a notificação para uma matrícula individual.
+                    </span>
+                  </div>
+                </button>
+              </div>
+
+              {/* Painel de Busca do Estudante Específico */}
+              {!isSendToAll && (
+                <div className="pt-2 space-y-4 border-t border-zinc-200/80">
+                  {/* Se um aluno já está selecionado */}
+                  {selectedStudent ? (
+                    <div className="p-4 rounded-xl bg-blue-50/60 border border-blue-200 flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="w-10 h-10 rounded-xl bg-[#0b439c] text-white flex items-center justify-center font-bold text-xs shrink-0">
+                          {selectedStudent.nome ? selectedStudent.nome.slice(0, 2).toUpperCase() : "AL"}
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-xs font-bold text-zinc-900 truncate">
+                            {selectedStudent.nome || selectedStudent.name || "Estudante"}
+                          </p>
+                          <p className="text-[11px] text-zinc-500 truncate">
+                            {selectedStudent.email}
+                          </p>
+                          <p className="text-[11px] font-mono text-[#0b439c] font-black">
+                            Matrícula: {selectedStudent.matricula || selectedStudent.id}
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setTargetMatricula("");
+                          setManualMatriculaInput("");
+                        }}
+                        className="px-3 py-1.5 bg-white hover:bg-zinc-100 text-zinc-700 rounded-lg text-xs font-bold border border-zinc-200 transition-colors cursor-pointer shrink-0"
+                      >
+                        Trocar Aluno
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
                       <div>
-                        <label className="block text-xs font-bold text-zinc-700 mb-1">
-                          Matrícula do Aluno de Destino <span className="text-red-500">*</span>
+                        <label className="block text-xs font-bold text-zinc-700 mb-1.5">
+                          Pesquisar por nome, e-mail ou matrícula:
                         </label>
-                        <input
-                          type="text"
-                          value={targetMatricula}
-                          onChange={(e) => setTargetMatricula(e.target.value)}
-                          placeholder="Ex: 20261012, 1042..."
-                          className="w-full bg-white border border-zinc-300 rounded-xl px-4 py-2.5 text-xs font-mono font-bold text-zinc-900 focus:outline-none focus:border-[#0b439c] focus:ring-1 focus:ring-[#0b439c]"
-                          required={!isSendToAll}
-                        />
-                      </div>
-
-                      {/* Busca rápida de usuários cadastrados */}
-                      {allUsers && allUsers.length > 0 && (
-                        <div className="space-y-1.5">
-                          <label className="block text-[11px] font-bold text-zinc-500">
-                            Ou selecione um aluno cadastrado na plataforma:
-                          </label>
+                        <div className="relative">
+                          <Search className="w-4 h-4 text-zinc-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
                           <input
                             type="text"
-                            value={selectedUserFilter}
-                            onChange={(e) => setSelectedUserFilter(e.target.value)}
-                            placeholder="Filtrar por nome ou e-mail..."
-                            className="w-full bg-white border border-zinc-200 rounded-xl px-3 py-1.5 text-xs text-zinc-700 focus:outline-none focus:border-[#0b439c]"
+                            value={userSearchQuery}
+                            onChange={(e) => {
+                              setUserSearchQuery(e.target.value);
+                              setManualMatriculaInput(e.target.value);
+                            }}
+                            placeholder="Digite o nome, e-mail ou número de matrícula..."
+                            className="w-full bg-white border border-zinc-300 rounded-xl pl-10 pr-4 py-2.5 text-xs text-zinc-900 focus:outline-none focus:border-[#0b439c] focus:ring-1 focus:ring-[#0b439c]"
                           />
-                          <div className="max-h-36 overflow-y-auto divide-y divide-zinc-100 bg-white border border-zinc-200 rounded-xl">
-                            {matchingStudents.map((usr: any) => {
-                              const matricula = usr.matricula || usr.id;
-                              const isSelected = targetMatricula === matricula;
-                              return (
-                                <button
-                                  key={matricula}
-                                  type="button"
-                                  onClick={() => {
-                                    setTargetMatricula(matricula);
-                                    setSelectedUserFilter("");
-                                  }}
-                                  className={`w-full text-left p-2 px-3 text-xs flex items-center justify-between transition-colors cursor-pointer hover:bg-blue-50 ${
-                                    isSelected ? "bg-blue-100/60 font-bold" : ""
-                                  }`}
-                                >
-                                  <div>
-                                    <span className="text-zinc-900 font-bold">{usr.nome || usr.name || "Aluno"}</span>
-                                    <span className="text-zinc-400 text-[11px] ml-2">({usr.email})</span>
-                                  </div>
-                                  <span className="font-mono text-[#0b439c] font-black text-[11px]">
-                                    {matricula}
+                        </div>
+                      </div>
+
+                      {/* Lista de alunos correspondentes */}
+                      {matchingStudents.length > 0 && (
+                        <div className="max-h-48 overflow-y-auto divide-y divide-zinc-100 bg-white border border-zinc-200 rounded-xl shadow-2xs">
+                          {matchingStudents.map((usr: any) => {
+                            const matricula = String(usr.matricula || usr.id || "");
+                            return (
+                              <button
+                                key={matricula}
+                                type="button"
+                                onClick={() => {
+                                  setTargetMatricula(matricula);
+                                  setManualMatriculaInput(matricula);
+                                  setUserSearchQuery("");
+                                }}
+                                className="w-full text-left p-3 text-xs flex items-center justify-between transition-colors cursor-pointer hover:bg-blue-50/60"
+                              >
+                                <div className="min-w-0 pr-3">
+                                  <span className="font-bold text-zinc-900 block truncate">
+                                    {usr.nome || usr.name || "Aluno"}
                                   </span>
-                                </button>
-                              );
-                            })}
-                          </div>
+                                  <span className="text-zinc-500 text-[11px] block truncate">
+                                    {usr.email}
+                                  </span>
+                                </div>
+                                <span className="font-mono text-[#0b439c] font-black text-xs shrink-0 bg-blue-50 px-2 py-1 rounded border border-blue-100">
+                                  {matricula}
+                                </span>
+                              </button>
+                            );
+                          })}
                         </div>
                       )}
+
+                      {/* Opção alternativa de digitar matrícula manual caso o aluno não esteja na lista inicial */}
+                      <div className="pt-1 flex items-center gap-2">
+                        <span className="text-[11px] text-zinc-400">Ou informe a matrícula direta:</span>
+                        <input
+                          type="text"
+                          value={manualMatriculaInput}
+                          onChange={(e) => {
+                            setManualMatriculaInput(e.target.value);
+                            setTargetMatricula(e.target.value);
+                          }}
+                          placeholder="Ex: 20261012"
+                          className="w-36 bg-white border border-zinc-300 rounded-lg px-2.5 py-1 text-xs font-mono font-bold text-zinc-900 focus:outline-none focus:border-[#0b439c]"
+                        />
+                      </div>
                     </div>
                   )}
                 </div>
+              )}
+            </div>
 
-                {/* 2. Categoria / Tipo */}
-                <div className="space-y-2">
-                  <label className="block text-xs font-black uppercase tracking-wider text-zinc-700">
-                    Tipo do Comunicado
-                  </label>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                    {[
-                      { id: "Aviso Geral", label: "Aviso Geral", color: "blue" },
-                      { id: "Segurança", label: "Segurança", color: "red" },
-                      { id: "Comunicado Oficial", label: "Comunicado Oficial", color: "amber" },
-                      { id: "Atendimento & Suporte", label: "Suporte", color: "purple" }
-                    ].map((item) => (
-                      <button
-                        key={item.id}
-                        type="button"
-                        onClick={() => setTipo(item.id)}
-                        className={`p-3 rounded-xl border text-xs font-bold transition-all text-center cursor-pointer ${
-                          tipo === item.id
-                            ? "bg-[#0b439c] text-white border-[#0b439c] shadow-xs"
-                            : "bg-white text-zinc-700 border-zinc-200 hover:bg-zinc-50"
-                        }`}
-                      >
-                        {item.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
+            {/* 2. Tipo de Comunicado (com opção 'Outro' e campo de preenchimento) */}
+            <div className="space-y-2.5">
+              <label className="block text-xs font-black uppercase tracking-wider text-zinc-700">
+                Tipo do Comunicado
+              </label>
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5">
+                {[
+                  { id: "Aviso Geral", label: "Aviso Geral" },
+                  { id: "Segurança", label: "Segurança" },
+                  { id: "Comunicado Oficial", label: "Comunicado Oficial" },
+                  { id: "Suporte", label: "Suporte" },
+                  { id: "Outro", label: "Outro" }
+                ].map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => {
+                      setTipo(item.id);
+                      if (item.id !== "Outro") setCustomTipo("");
+                    }}
+                    className={`p-3 rounded-xl border text-xs font-bold transition-all text-center cursor-pointer ${
+                      tipo === item.id
+                        ? "bg-[#0b439c] text-white border-[#0b439c] shadow-xs"
+                        : "bg-white text-zinc-700 border-zinc-200 hover:bg-zinc-50"
+                    }`}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
 
-                {/* 3. Título */}
-                <div className="space-y-2">
-                  <label className="block text-xs font-black uppercase tracking-wider text-zinc-700">
-                    Título da Notificação <span className="text-red-500">*</span>
+              {/* Caixinha quando selecionar 'Outro' */}
+              {tipo === "Outro" && (
+                <div className="pt-2 animate-in fade-in duration-150 space-y-1">
+                  <label className="block text-xs font-bold text-zinc-700">
+                    Especifique o tipo ou assunto personalizado: <span className="text-red-500">*</span>
                   </label>
                   <input
                     type="text"
-                    value={titulo}
-                    onChange={(e) => setTitulo(e.target.value)}
-                    placeholder="Ex: Atualização Importante sobre as Aulas e Avaliações"
-                    className="w-full bg-white border border-zinc-300 rounded-xl px-4 py-3 text-sm font-bold text-zinc-900 focus:outline-none focus:border-[#0b439c] focus:ring-1 focus:ring-[#0b439c]"
-                    required
+                    value={customTipo}
+                    onChange={(e) => setCustomTipo(e.target.value)}
+                    placeholder="Ex: Evento Especial, Cronograma Acadêmico, Parceria..."
+                    className="w-full bg-white border border-zinc-300 rounded-xl px-4 py-2.5 text-xs font-bold text-zinc-900 focus:outline-none focus:border-[#0b439c] focus:ring-1 focus:ring-[#0b439c]"
+                    required={tipo === "Outro"}
                   />
                 </div>
+              )}
+            </div>
 
-                {/* 4. Mensagem Completa */}
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <label className="block text-xs font-black uppercase tracking-wider text-zinc-700">
-                      Mensagem / Conteúdo <span className="text-red-500">*</span>
-                    </label>
-                    <span className="text-[11px] text-zinc-400 font-mono">
-                      {mensagem.length} caracteres
-                    </span>
-                  </div>
-                  <textarea
-                    rows={8}
-                    value={mensagem}
-                    onChange={(e) => setMensagem(e.target.value)}
-                    placeholder="Digite detalhadamente a mensagem que os alunos lerão..."
-                    className="w-full bg-white border border-zinc-300 rounded-2xl p-4 text-xs font-medium text-zinc-900 leading-relaxed focus:outline-none focus:border-[#0b439c] focus:ring-1 focus:ring-[#0b439c]"
-                    required
-                  />
-                </div>
+            {/* 3. Título da Notificação */}
+            <div className="space-y-2">
+              <label className="block text-xs font-black uppercase tracking-wider text-zinc-700">
+                Título da Notificação <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="text"
+                value={titulo}
+                onChange={(e) => setTitulo(e.target.value)}
+                placeholder="Ex: Atualização Importante sobre as Aulas e Avaliações"
+                className="w-full bg-white border border-zinc-300 rounded-xl px-4 py-3 text-sm font-bold text-zinc-900 focus:outline-none focus:border-[#0b439c] focus:ring-1 focus:ring-[#0b439c]"
+                required
+              />
+            </div>
+
+            {/* 4. Mensagem / Conteúdo */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="block text-xs font-black uppercase tracking-wider text-zinc-700">
+                  Mensagem / Conteúdo <span className="text-red-500">*</span>
+                </label>
+                <span className="text-[11px] text-zinc-400 font-mono">
+                  {mensagem.length} caracteres
+                </span>
               </div>
-
-              {/* Coluna Direita: Pré-visualização ao vivo */}
-              <div className="space-y-4">
-                <div className="flex items-center gap-2">
-                  <Sparkles className="w-4 h-4 text-amber-500" />
-                  <span className="text-xs font-black uppercase tracking-wider text-zinc-600">
-                    Pré-visualização do Aluno
-                  </span>
-                </div>
-
-                <div className="bg-zinc-50 border border-zinc-200 rounded-2xl p-5 space-y-4 sticky top-6">
-                  <div className="flex items-center justify-between">
-                    <span
-                      className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider border ${getBadgeStyle(
-                        tipo
-                      )}`}
-                    >
-                      {tipo}
-                    </span>
-                    <span className="text-[10px] text-zinc-400">Agora</span>
-                  </div>
-
-                  <div>
-                    <h4 className="font-bold text-sm text-zinc-900 leading-snug">
-                      {titulo.trim() || "Título da sua notificação"}
-                    </h4>
-                    <p className="text-xs text-zinc-600 font-medium whitespace-pre-wrap leading-relaxed mt-2 bg-white p-3.5 rounded-xl border border-zinc-200/80">
-                      {mensagem.trim() ||
-                        "O conteúdo completo digitado ao lado aparecerá aqui exatamente como o estudante visualizará em seu painel..."}
-                    </p>
-                  </div>
-
-                  <div className="pt-2 border-t border-zinc-200/80 flex items-center justify-between text-[11px] text-zinc-500">
-                    <span>Destinatário:</span>
-                    <strong className="text-zinc-800">
-                      {isSendToAll ? "🌐 Todos os Alunos" : targetMatricula || "—"}
-                    </strong>
-                  </div>
-                </div>
-              </div>
+              <textarea
+                rows={9}
+                value={mensagem}
+                onChange={(e) => setMensagem(e.target.value)}
+                placeholder="Digite detalhadamente a mensagem que os alunos lerão..."
+                className="w-full bg-white border border-zinc-300 rounded-2xl p-4 text-xs font-medium text-zinc-900 leading-relaxed focus:outline-none focus:border-[#0b439c] focus:ring-1 focus:ring-[#0b439c]"
+                required
+              />
             </div>
 
             {/* Barra de Rodapé com Ações */}
