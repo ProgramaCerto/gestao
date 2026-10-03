@@ -178,9 +178,9 @@ function getInitialRouteInfo() {
       activeTab = "termos";
     } else if (first === "documentos" || first === "documento" || first === "docs") {
       activeTab = "documentos";
-    } else if (first === "ocorrencias" || first === "ocorrencia" || first === "seguranca") {
+    } else if (first === "ocorrencias" || first === "ocorrencia" || first.startsWith("ocorrencias-") || first.startsWith("ocorrencia-") || first === "seguranca") {
       activeTab = "ocorrencias";
-    } else if (first === "notificacoes" || first === "notificacao" || first === "comunicados" || first === "avisos") {
+    } else if (first === "notificacoes" || first === "notificacao" || first.startsWith("notificacoes-") || first.startsWith("notificacao-") || first === "comunicados" || first === "avisos") {
       activeTab = "notificacoes";
     } else if (first.startsWith("atendimento-") || first.startsWith("central-de-atendimento-")) {
       activeTab = "atendimento";
@@ -1592,11 +1592,11 @@ export default function App() {
       setActiveTab("documentos");
       return;
     }
-    if (clean === "ocorrencias" || clean === "ocorrencia" || clean === "seguranca") {
+    if (clean === "ocorrencias" || clean === "ocorrencia" || clean.startsWith("ocorrencias-") || clean.startsWith("ocorrencia-") || clean.startsWith("ocorrencias/") || clean === "seguranca") {
       setActiveTab("ocorrencias");
       return;
     }
-    if (clean === "notificacoes" || clean === "notificacao" || clean === "comunicados" || clean === "avisos") {
+    if (clean === "notificacoes" || clean === "notificacao" || clean.startsWith("notificacoes-") || clean.startsWith("notificacao-") || clean.startsWith("notificacoes/") || clean === "comunicados" || clean === "avisos") {
       setActiveTab("notificacoes");
       return;
     }

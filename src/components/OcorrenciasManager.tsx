@@ -112,6 +112,13 @@ export const OcorrenciasManager: React.FC<OcorrenciasManagerProps> = ({
     }
   };
 
+  // Atualizar URL do navegador com histórico pushState
+  const updateUrl = (path: string) => {
+    if (typeof window !== "undefined") {
+      window.history.pushState({}, "", path);
+    }
+  };
+
   // Excluir ocorrência
   const handleDeleteOcorrencia = async (id: string) => {
     if (!confirm("Tem certeza que deseja excluir este registro de ocorrência?")) return;
@@ -123,6 +130,7 @@ export const OcorrenciasManager: React.FC<OcorrenciasManagerProps> = ({
         if (selectedOcorrencia?.id === id) {
           setViewMode("list");
           setSelectedOcorrencia(null);
+          updateUrl("/ocorrencias");
         }
       }
     } catch (err) {
@@ -134,6 +142,13 @@ export const OcorrenciasManager: React.FC<OcorrenciasManagerProps> = ({
   const handleOpenDetail = (ocorrencia: OcorrenciaItem) => {
     setSelectedOcorrencia(ocorrencia);
     setViewMode("detail");
+    updateUrl(`/ocorrencias/visualizar-${ocorrencia.id}`);
+  };
+
+  const handleBackToList = () => {
+    setViewMode("list");
+    setSelectedOcorrencia(null);
+    updateUrl("/ocorrencias");
   };
 
   // Redirecionar para emitir notificação para este aluno
@@ -433,10 +448,7 @@ export const OcorrenciasManager: React.FC<OcorrenciasManagerProps> = ({
             <div className="flex items-center gap-3">
               <button
                 type="button"
-                onClick={() => {
-                  setViewMode("list");
-                  setSelectedOcorrencia(null);
-                }}
+                onClick={handleBackToList}
                 className="p-2.5 rounded-xl bg-white border border-zinc-200 hover:bg-zinc-100 text-zinc-700 font-bold text-xs transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs"
               >
                 <ArrowLeft className="w-4 h-4" />
@@ -539,10 +551,7 @@ export const OcorrenciasManager: React.FC<OcorrenciasManagerProps> = ({
             <div className="pt-4 border-t border-zinc-200 flex items-center justify-between">
               <button
                 type="button"
-                onClick={() => {
-                  setViewMode("list");
-                  setSelectedOcorrencia(null);
-                }}
+                onClick={handleBackToList}
                 className="px-5 py-2.5 rounded-xl border border-zinc-300 hover:bg-zinc-100 text-zinc-700 font-bold text-xs transition-colors cursor-pointer"
               >
                 Voltar à Lista de Ocorrências
