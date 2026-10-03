@@ -64,7 +64,8 @@ import {
   RefreshCw,
   Tag,
   Printer,
-  Download
+  Download,
+  Bell
 } from "lucide-react";
 import { ProjectsView } from "./components/ProjectsView";
 import { TicketDetailView } from "./components/TicketDetailView";
@@ -72,6 +73,7 @@ import { TicketPdfView } from "./components/TicketPdfView";
 import { TermsOfUseView } from "./components/TermsOfUseView";
 import { DocumentosManager } from "./components/DocumentosManager";
 import { OcorrenciasManager } from "./components/OcorrenciasManager";
+import { NotificacoesManager } from "./components/NotificacoesManager";
 import { TERMS_PLAIN_TEXT_FOR_CLIPBOARD } from "./data/termsOfUse";
 import {
   generateTicketPdf,
@@ -160,7 +162,7 @@ function getInitialRouteInfo() {
   let authMode: "login" | "forgot" = "login";
 
 
-  let activeTab: "dashboard" | "usuarios" | "atendimento" | "documentos" | "ocorrencias" | "perfil" | "termos" = "dashboard";
+  let activeTab: "dashboard" | "usuarios" | "atendimento" | "documentos" | "ocorrencias" | "notificacoes" | "perfil" | "termos" = "dashboard";
   let courseSlug = "";
   let lessonSlug = "";
   let isViewingCourseInfo = false;
@@ -178,6 +180,8 @@ function getInitialRouteInfo() {
       activeTab = "documentos";
     } else if (first === "ocorrencias" || first === "ocorrencia" || first === "seguranca") {
       activeTab = "ocorrencias";
+    } else if (first === "notificacoes" || first === "notificacao" || first === "comunicados" || first === "avisos") {
+      activeTab = "notificacoes";
     } else if (first.startsWith("atendimento-") || first.startsWith("central-de-atendimento-")) {
       activeTab = "atendimento";
       const protoPart = first.replace(/^(central-de-)?atendimento-/, "");
@@ -222,8 +226,9 @@ export default function App() {
 
   const initialRoute = getInitialRouteInfo();
 
-  // Navigation: 'dashboard' | 'usuarios' | 'atendimento' | 'documentos' | 'ocorrencias' | 'perfil' | 'termos' (restrita aos painéis administrativos)
-  const [activeTab, setActiveTab] = useState<"dashboard" | "usuarios" | "atendimento" | "documentos" | "ocorrencias" | "perfil" | "termos" | "trilhas" | "courses" | "projects" | "lesson-view" | "cursos_gestao">(initialRoute.activeTab);
+  // Navigation: 'dashboard' | 'usuarios' | 'atendimento' | 'documentos' | 'ocorrencias' | 'notificacoes' | 'perfil' | 'termos' (restrita aos painéis administrativos)
+  const [activeTab, setActiveTab] = useState<"dashboard" | "usuarios" | "atendimento" | "documentos" | "ocorrencias" | "notificacoes" | "perfil" | "termos" | "trilhas" | "courses" | "projects" | "lesson-view" | "cursos_gestao">(initialRoute.activeTab);
+  const [targetMatriculaForNotif, setTargetMatriculaForNotif] = useState<string>("");
 
   // User Role/Account Type State (Exclusive administrator management panel)
   const [accountType, setAccountType] = useState<"estudante" | "instrutor" | "administrador">("administrador");
@@ -1470,6 +1475,7 @@ export default function App() {
     }
     if (activeTab === "documentos") return "/documentos";
     if (activeTab === "ocorrencias") return "/ocorrencias";
+    if (activeTab === "notificacoes") return "/notificacoes";
     if (activeTab === "usuarios") return "/usuarios";
     return "/dashboard";
   };
@@ -1588,6 +1594,10 @@ export default function App() {
     }
     if (clean === "ocorrencias" || clean === "ocorrencia" || clean === "seguranca") {
       setActiveTab("ocorrencias");
+      return;
+    }
+    if (clean === "notificacoes" || clean === "notificacao" || clean === "comunicados" || clean === "avisos") {
+      setActiveTab("notificacoes");
       return;
     }
 
@@ -6713,6 +6723,22 @@ export default function App() {
                 <span>OCORRÊNCIAS</span>
               </button>
 
+              <button
+                type="button"
+                onClick={() => {
+                  setTargetMatriculaForNotif("");
+                  navigateToTab("notificacoes");
+                }}
+                className={`w-full flex items-center gap-3 px-3.5 py-3 rounded-xl font-bold text-sm transition-all text-left cursor-pointer ${
+                  activeTab === "notificacoes"
+                    ? "bg-[#0b439c] text-white shadow-md shadow-blue-900/10"
+                    : "text-zinc-700 hover:bg-zinc-100"
+                }`}
+              >
+                <Bell className="w-5 h-5 shrink-0 text-amber-500" />
+                <span>NOTIFICAÇÕES</span>
+              </button>
+
               <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider px-3 mt-5 mb-2 select-none">
                 Minha Conta
               </p>
@@ -6903,7 +6929,20 @@ export default function App() {
                 >
                   <ShieldAlert className="w-5 h-5 text-red-600 group-hover:scale-110 transition-transform" />
                   <h4 className="font-bold text-sm text-zinc-900">Ocorrências</h4>
-                  <p className="text-xs text-zinc-500">Auditoria de infrações, tentativas de cópia/impressão e avisos de segurança.</p>
+                  <p className="text-xs text-zinc-500">Auditoria de infrações, tentativas de cópia/impressão e diretrizes de segurança.</p>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTargetMatriculaForNotif("");
+                    navigateToTab("notificacoes");
+                  }}
+                  className="p-5 bg-zinc-50 hover:bg-amber-50/50 border border-zinc-200 hover:border-amber-300 rounded-2xl transition-all text-left space-y-1.5 group cursor-pointer"
+                >
+                  <Bell className="w-5 h-5 text-amber-600 group-hover:scale-110 transition-transform" />
+                  <h4 className="font-bold text-sm text-zinc-900">Notificações</h4>
+                  <p className="text-xs text-zinc-500">Emissão e controle de comunicados oficiais, avisos gerais e alertas diretos aos alunos.</p>
                 </button>
               </div>
             </div>
@@ -11648,7 +11687,24 @@ export default function App() {
         )}
 
         {activeTab === "ocorrencias" && (
-          <OcorrenciasManager allUsers={allUsers} currentAdminName={studentName} currentUserId={user?.user_metadata?.matricula || user?.id} />
+          <OcorrenciasManager
+            allUsers={allUsers}
+            currentAdminName={studentName}
+            currentUserId={user?.user_metadata?.matricula || user?.id}
+            onNavigateToNotificacoes={(matricula) => {
+              setTargetMatriculaForNotif(matricula || "");
+              navigateToTab("notificacoes");
+            }}
+          />
+        )}
+
+        {activeTab === "notificacoes" && (
+          <NotificacoesManager
+            allUsers={allUsers}
+            currentAdminName={studentName}
+            currentUserId={user?.user_metadata?.matricula || user?.id}
+            initialTargetMatricula={targetMatriculaForNotif}
+          />
         )}
 
       </main>
@@ -11815,6 +11871,21 @@ export default function App() {
                 >
                   <ShieldAlert className="w-5 h-5 text-red-500" />
                   OCORRÊNCIAS
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTargetMatriculaForNotif("");
+                    navigateToTab("notificacoes");
+                    setIsMobileMenuOpen(false);
+                  }}
+                  className={`w-full flex items-center gap-3 px-3.5 py-3 rounded-xl font-bold text-sm transition-all text-left cursor-pointer ${
+                    activeTab === "notificacoes" ? "bg-[#0b439c] text-white shadow-md shadow-blue-900/10" : "text-zinc-700 hover:bg-zinc-100"
+                  }`}
+                >
+                  <Bell className="w-5 h-5 text-amber-500" />
+                  NOTIFICAÇÕES
                 </button>
 
                 <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider px-3 mt-5 mb-2 select-none">
