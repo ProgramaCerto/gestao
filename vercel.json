@@ -1,23 +1,21 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "vite",
-  "installCommand": "rm -f bun.lock bun.lockb package-lock.json && npm install --include=dev --no-package-lock --legacy-peer-deps",
-  "buildCommand": "npm run vercel-build",
+  "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "cleanUrls": true,
   "rewrites": [
     {
       "source": "/api/(.*)",
-      "destination": "/api/index.js"
+      "destination": "/api"
     },
     {
       "source": "/api",
-      "destination": "/api/index.js"
+      "destination": "/api"
     },
     {
-      "source": "/((?!api/|assets/|.*\\..*).*)",
+      "source": "/(.*)",
       "destination": "/index.html"
     }
   ]
 }
-
