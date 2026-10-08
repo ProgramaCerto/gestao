@@ -1014,34 +1014,54 @@ export default function App() {
       const finalUserEmail = rawUserEmail || (matchedUser?.email ? matchedUser.email.toLowerCase().trim() : "");
 
       try {
+        const unblockPayload: any = { acesso: "Liberado", motivo_do_bloqueio: null, motivo: null };
         if (finalUserMat) {
-          const { error: errByMat } = await supabase
+          let { error: errByMat } = await supabase
             .from("usuarios")
-            .update({ acesso: "Liberado", motivo: null })
+            .update(unblockPayload)
             .eq("matricula", finalUserMat);
+          if (errByMat) {
+            // fallback if only motivo_do_bloqueio or motivo exists
+            const { error: errRetry } = await supabase
+              .from("usuarios")
+              .update({ acesso: "Liberado", motivo_do_bloqueio: null })
+              .eq("matricula", finalUserMat);
+            if (errRetry) {
+              await supabase
+                .from("usuarios")
+                .update({ acesso: "Liberado" })
+                .eq("matricula", finalUserMat);
+            }
+          }
           if (errByMat && isValidUUID(finalUserMat)) {
             await supabase
               .from("usuarios")
-              .update({ acesso: "Liberado", motivo: null })
+              .update({ acesso: "Liberado", motivo_do_bloqueio: null })
               .eq("id", finalUserMat);
           }
         }
         if (finalUserEmail) {
           const { error: errByEmail } = await supabase
             .from("usuarios")
-            .update({ acesso: "Liberado", motivo: null })
+            .update({ acesso: "Liberado", motivo_do_bloqueio: null })
             .eq("email", finalUserEmail);
           if (errByEmail) {
-            console.error("Erro ao desbloquear usuário por e-mail:", errByEmail);
+            await supabase
+              .from("usuarios")
+              .update({ acesso: "Liberado" })
+              .eq("email", finalUserEmail);
           }
         }
         if (!finalUserMat && !finalUserEmail && rawUserName) {
           const { error: errByName } = await supabase
             .from("usuarios")
-            .update({ acesso: "Liberado", motivo: null })
+            .update({ acesso: "Liberado", motivo_do_bloqueio: null })
             .eq("nome", rawUserName);
           if (errByName) {
-            console.error("Erro ao desbloquear usuário por nome:", errByName);
+            await supabase
+              .from("usuarios")
+              .update({ acesso: "Liberado" })
+              .eq("nome", rawUserName);
           }
         }
 
@@ -1118,23 +1138,26 @@ export default function App() {
     const isUUID = isValidUUID(targetIdOrEmail);
     try {
       if (supabase) {
+        const blockMotivoText = newStatus === "Bloqueado" ? (motivo || "Bloqueado administrativamente.") : null;
+        const blockPayload: any = {
+          acesso: newStatus,
+          motivo_do_bloqueio: blockMotivoText
+        };
         if (isEmail) {
-          const { error } = await supabase.from("usuarios").update({
-            acesso: newStatus,
-            motivo: newStatus === "Bloqueado" ? (motivo || "Bloqueado administrativamente.") : null
-          }).eq("email", targetIdOrEmail.toLowerCase().trim());
-          if (error) throw error;
+          let { error } = await supabase.from("usuarios").update(blockPayload).eq("email", targetIdOrEmail.toLowerCase().trim());
+          if (error) {
+            await supabase.from("usuarios").update({ acesso: newStatus, motivo: blockMotivoText }).eq("email", targetIdOrEmail.toLowerCase().trim());
+          }
         } else {
-          const { error: matErr } = await supabase.from("usuarios").update({
-            acesso: newStatus,
-            motivo: newStatus === "Bloqueado" ? (motivo || "Bloqueado administrativamente.") : null
-          }).eq("matricula", targetIdOrEmail.trim());
+          let { error: matErr } = await supabase.from("usuarios").update(blockPayload).eq("matricula", targetIdOrEmail.trim());
+          if (matErr) {
+            await supabase.from("usuarios").update({ acesso: newStatus, motivo: blockMotivoText }).eq("matricula", targetIdOrEmail.trim());
+          }
           if (matErr && isUUID) {
-            const { error: idErr } = await supabase.from("usuarios").update({
-              acesso: newStatus,
-              motivo: newStatus === "Bloqueado" ? (motivo || "Bloqueado administrativamente.") : null
-            }).eq("id", targetIdOrEmail.trim());
-            if (idErr) throw idErr;
+            const { error: idErr } = await supabase.from("usuarios").update(blockPayload).eq("id", targetIdOrEmail.trim());
+            if (idErr) {
+              await supabase.from("usuarios").update({ acesso: newStatus, motivo: blockMotivoText }).eq("id", targetIdOrEmail.trim());
+            }
           }
         }
       }
@@ -2239,7 +2262,7 @@ export default function App() {
         localStorage.removeItem("aluradev_saved_user");
         localStorage.removeItem("aluradev_custom_user");
         localStorage.removeItem("aluradev_saved_guest");
-        const motivoTexto = userRow.motivo || "Acesso temporariamente bloqueado pela administração.";
+        const motivoTexto = userRow.motivo_do_bloqueio || userRow.motivo || "Acesso temporariamente bloqueado pela administração.";
         const resolvedMat = extractMatricula(userRow.matricula || userRow.id || targetUser?.id || "");
         setBlockedAccountInfo({
           id: userRow.matricula || userRow.id || targetUser?.id,
@@ -2475,7 +2498,7 @@ export default function App() {
             account_type: (u.papel || u.tipo_de_conta || "").toLowerCase().includes("admin") ? "administrador" : (u.papel || u.tipo_de_conta || "").toLowerCase().includes("instru") ? "instrutor" : "estudante",
             acesso: (u.acesso === "Bloqueado" || u.status_da_conta === "Bloqueado" || u.status === "Bloqueado") ? "Bloqueado" : "Liberado",
             status: (u.acesso === "Bloqueado" || u.status_da_conta === "Bloqueado" || u.status === "Bloqueado") ? "Bloqueado" : "Liberado",
-            motivo: u.motivo || "",
+            motivo: u.motivo_do_bloqueio || u.motivo || "",
             quantidades_bloqueio: u.quantidades_bloqueio !== undefined ? u.quantidades_bloqueio : null,
             created_at: u.data_do_cadastro ? String(u.data_do_cadastro).split("T")[0] : "2026-07-23"
           };
@@ -2661,7 +2684,7 @@ export default function App() {
             category: dbC.categoria || dbC.category || "Geral",
             duration: dbC.duration || `${dbC.aulas || (parsedModules[0]?.lessons.length) || 10} Aulas`,
             instructor: dbC.instrutor || dbC.instructor || "Instrutor da Plataforma",
-            gradientColor: dbC.gradient_color || dbC.gradientColor || "#ADD8E6, #000084",
+            gradientColor: dbC.gradiente_color || dbC.gradient_color || dbC.gradientColor || "#ADD8E6, #000084",
             visibility: dbC.visibilidade || dbC.visibility || "Público",
             lessonsCount: dbC.duration || `${(parsedModules[0]?.lessons.length) || 10} Aulas`,
             id_trilha: dbC.id_trilha !== undefined && dbC.id_trilha !== null ? dbC.id_trilha : (dbC.trilha_id || null),
@@ -2900,7 +2923,7 @@ export default function App() {
             localStorage.removeItem("aluradev_saved_user");
             localStorage.removeItem("aluradev_custom_user");
             localStorage.removeItem("aluradev_saved_guest");
-            const motivo = userRecord.motivo || "Acesso temporariamente bloqueado pela administração.";
+            const motivo = userRecord.motivo_do_bloqueio || userRecord.motivo || "Acesso temporariamente bloqueado pela administração.";
             const recId = userRecord.matricula || userRecord.id;
             setBlockedAccountInfo({
               id: recId,
@@ -3009,7 +3032,7 @@ export default function App() {
           localStorage.removeItem("aluradev_saved_user");
           localStorage.removeItem("aluradev_custom_user");
           localStorage.removeItem("aluradev_saved_guest");
-          const motivo = postAuthCheck.motivo || "Acesso temporariamente bloqueado pela administração.";
+          const motivo = postAuthCheck.motivo_do_bloqueio || postAuthCheck.motivo || "Acesso temporariamente bloqueado pela administração.";
           const pKey = postAuthCheck.matricula || postAuthCheck.id || loggedUser.id;
           setBlockedAccountInfo({
             id: pKey,
@@ -3027,7 +3050,7 @@ export default function App() {
         const existingRole = dbUserCheck?.papel || postAuthCheck?.papel;
         const mappedRole = existingRole || (authRoleSelected === "administrador" ? "Admin" : authRoleSelected === "instrutor" ? "Instrutor" : "Aluno");
         const existingAcesso = dbUserCheck?.acesso || postAuthCheck?.acesso || "Liberado";
-        const existingMotivo = dbUserCheck?.motivo || postAuthCheck?.motivo || null;
+        const existingMotivo = dbUserCheck?.motivo_do_bloqueio || dbUserCheck?.motivo || postAuthCheck?.motivo_do_bloqueio || postAuthCheck?.motivo || null;
 
         // Role verification: Only administrators (admin) in 'usuarios' table can enter this admin portal
         const userRoleVal = String(dbUserCheck?.papel || dbUserCheck?.tipo_de_conta || postAuthCheck?.papel || postAuthCheck?.tipo_de_conta || (userRecord as any)?.papel || (userRecord as any)?.account_type || (userRecord as any)?.cargo || "").toLowerCase();
@@ -3048,15 +3071,24 @@ export default function App() {
 
         try {
           const userMat = extractMatricula(dbUserCheck?.matricula || postAuthCheck?.matricula || loggedUser.matricula || loggedUser.id || "");
-          const { error: upErr } = await supabase.from("usuarios").upsert({
+          const syncPayload: any = {
             matricula: userMat,
             nome: nameToUse,
             email: emailLower,
             papel: mappedRole,
             senha: scramblePassword(authPassword),
-            acesso: existingAcesso,
-            motivo: existingMotivo
-          }, { onConflict: "matricula" });
+            acesso: existingAcesso
+          };
+          if (existingMotivo) {
+            syncPayload.motivo_do_bloqueio = existingMotivo;
+          }
+          let { error: upErr } = await supabase.from("usuarios").upsert(syncPayload, { onConflict: "matricula" });
+
+          if (upErr && existingMotivo) {
+            delete syncPayload.motivo_do_bloqueio;
+            syncPayload.motivo = existingMotivo;
+            upErr = (await supabase.from("usuarios").upsert(syncPayload, { onConflict: "matricula" })).error;
+          }
 
           if (upErr) {
             await supabase.from("usuarios").upsert({
@@ -3065,8 +3097,7 @@ export default function App() {
               email: emailLower,
               papel: mappedRole,
               senha: scramblePassword(authPassword),
-              acesso: existingAcesso,
-              motivo: existingMotivo
+              acesso: existingAcesso
             }, { onConflict: "id" });
           }
 
@@ -3148,16 +3179,15 @@ export default function App() {
 
         const createdMatricula = generateMatricula(allUsers);
 
-        // Register directly in 'usuarios' table with exact columns: matricula, nome, email, senha, papel, data_do_cadastro, acesso, motivo
+        // Register directly in 'usuarios' table with exact columns: matricula, nome, email, senha, papel, data_do_cadastro, acesso
         try {
-          const userPayload = {
+          const userPayload: any = {
             matricula: createdMatricula,
             nome: nameToUse,
             email: emailLower,
             senha: scrambledPass,
             papel: mappedRole,
             acesso: "Liberado",
-            motivo: null,
             data_do_cadastro: new Date().toISOString()
           };
 
@@ -3171,8 +3201,7 @@ export default function App() {
             nome: nameToUse,
             senha: scrambledPass,
             papel: mappedRole,
-            acesso: "Liberado",
-            motivo: null
+            acesso: "Liberado"
           }).eq("email", emailLower);
 
           if (authRoleSelected === "administrador" || authRoleSelected === "instrutor") {
@@ -4154,12 +4183,13 @@ export default function App() {
     if (supabase) {
       const dbRole = editUserRole === "administrador" ? "Admin" : editUserRole === "instrutor" ? "Instrutor" : "Aluno";
       try {
+        const blockReason = editUserStatus === "Bloqueado" ? editUserMotivo.trim() : null;
         const updatePayload: any = {
           nome: editUserName.trim(),
           email: emailFormatted,
           papel: dbRole,
           acesso: editUserStatus,
-          motivo: editUserStatus === "Bloqueado" ? editUserMotivo.trim() : null
+          motivo_do_bloqueio: blockReason
         };
         if (editUserStatus === "Bloqueado" && editingUser.acesso !== "Bloqueado" && editingUser.status !== "Bloqueado") {
           const currentCount = typeof editingUser.quantidades_bloqueio === "number" ? editingUser.quantidades_bloqueio : 0;
@@ -4168,7 +4198,12 @@ export default function App() {
         if (editUserPassword.trim()) {
           updatePayload.senha = scramblePassword(editUserPassword.trim());
         }
-        const { error: uErr } = await supabase.from("usuarios").update(updatePayload).eq("matricula", targetMat || editingUser.id);
+        let { error: uErr } = await supabase.from("usuarios").update(updatePayload).eq("matricula", targetMat || editingUser.id);
+        if (uErr && String(uErr.message || "").includes("motivo_do_bloqueio")) {
+          delete updatePayload.motivo_do_bloqueio;
+          updatePayload.motivo = blockReason;
+          uErr = (await supabase.from("usuarios").update(updatePayload).eq("matricula", targetMat || editingUser.id)).error;
+        }
         if (uErr) {
           await supabase.from("usuarios").update(updatePayload).eq("id", editingUser.id);
         }
@@ -4286,9 +4321,7 @@ export default function App() {
           descricao: newCourseDescription.trim(),
           categoria: categoryName,
           aulas: numLessons,
-          instrutor: instructorName,
-          cor_do_gradiente: newCourseGradientColor.trim() || "#ADD8E6, #000084",
-          visibilidade: newCourseVisibility
+          gradiente_color: newCourseGradientColor.trim() || "#ADD8E6, #000084"
         };
 
         let { data: insertedC, error: cErr } = await supabase
@@ -4322,6 +4355,7 @@ export default function App() {
           for (let i = 1; i <= numLessons; i++) {
             await supabase.from("aulas_dos_cursos").insert({
               id_do_curso: insertedC.id,
+              numero_da_aula: i,
               aula: i,
               nome_da_aula: `Aula ${i}: ${newCourseTitle.trim()}`,
               conteudo: `# ${newCourseTitle.trim()} - Aula ${i}\n\nNesta aula do curso de **${categoryName}**, estudaremos os conceitos de **${newCourseTitle.trim()}** ministrado por **${instructorName}**.`

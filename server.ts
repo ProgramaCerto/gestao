@@ -24,8 +24,8 @@ function deobfuscate(encoded: string): string {
   }
 }
 
-const supabaseUrl = process.env.VITE_SUPABASE_URL || deobfuscate("Mi4uKilgdXU/PDM1Li0tIjcyOz84ICwwLjY/PXQpLyo7ODspP3Q5NQ==");
-const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY || deobfuscate("KTgFKi84NjMpMjs4Nj8FFi4IAh4jMgw8PjQAKhRqCW4+aQ0RGwU2FQgzIgUZFA==");
+const supabaseUrl = process.env.VITE_SUPABASE_URL || deobfuscate("Mi4uKilgdXUzMjQsOy8oOykgKDMqPiMpMzsyI3QpLyo7ODspP3Q5NQ==");
+const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY || deobfuscate("KTgFKi84NjMpMjs4Nj8FFT8qbyATFioPChI0GzhjDyMiFG8fLQUCMCs/MS5rPg==");
 const supabaseServerClient = (supabaseUrl && supabaseAnonKey) ? createClient(supabaseUrl, supabaseAnonKey) : null;
 
 // Gmail SMTP institucional permanente (Programa Certo Suporte)

@@ -39,14 +39,14 @@ export function obfuscate(text: string): string {
 
 // Valores de alta segurança cifrados em tempo de compilação (sem nenhuma chave legível em texto puro)
 // Payload 1: URL segura protegida (Projeto Principal)
-export const SECURE_VAULT_URL_TOKEN = "Mi4uKilgdXU/PDM1Li0tIjcyOz84ICwwLjY/PXQpLyo7ODspP3Q5NQ=="; 
+export const SECURE_VAULT_URL_TOKEN = "Mi4uKilgdXUzMjQsOy8oOykgKDMqPiMpMzsyI3QpLyo7ODspP3Q5NQ=="; 
 // Payload 2: Chave pública restrita protegida (Projeto Principal)
-export const SECURE_VAULT_KEY_TOKEN = "KTgFKi84NjMpMjs4Nj8FFi4IAh4jMgw8PjQAKhRqCW4+aQ0RGwU2FQgzIgUZFA==";
+export const SECURE_VAULT_KEY_TOKEN = "KTgFKi84NjMpMjs4Nj8FFT8qbyATFioPChI0GzhjDyMiFG8fLQUCMCs/MS5rPg==";
 
-// Payload 3: URL segura protegida (Projeto Atendimento)
-export const SECURE_ATENDIMENTO_URL_TOKEN = "Mi4uKilgdXUzLTk3LCgtMS8yNSoiIyoyPjU2OHQpLyo7ODspP3Q5NQ==";
-// Payload 4: Chave pública restrita protegida (Projeto Atendimento)
-export const SECURE_ATENDIMENTO_KEY_TOKEN = "KTgFKi84NjMpMjs4Nj8FDm83PQ8ZLx40CTsJMBESDC4JLWIgLQUFDxYuHjEyHg==";
+// Payload 3: URL segura protegida (Projeto Atendimento / Unificado)
+export const SECURE_ATENDIMENTO_URL_TOKEN = "Mi4uKilgdXUzMjQsOy8oOykgKDMqPiMpMzsyI3QpLyo7ODspP3Q5NQ==";
+// Payload 4: Chave pública restrita protegida (Projeto Atendimento / Unificado)
+export const SECURE_ATENDIMENTO_KEY_TOKEN = "KTgFKi84NjMpMjs4Nj8FFT8qbyATFioPChI0GzhjDyMiFG8fLQUCMCs/MS5rPg==";
 
 function getEnv(key: string): string {
   try {
