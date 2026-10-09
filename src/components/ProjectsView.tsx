@@ -499,47 +499,26 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({
         }
       }
 
-      // Try 'projeto_progresso' with matricula_usuario
-      let query1 = supabase.from("projeto_progresso").select("id").eq("id_do_projeto", numId);
-      if (uMat) query1 = query1.eq("matricula_usuario", uMat);
-      let { data: existing, error: pErr } = await query1.limit(1).maybeSingle();
+      // Atualizar ou inserir em 'projetos_progresso' (Tabela 7)
+      const projIdStr = String(projId);
+      let queryProg = supabase.from("projetos_progresso").select("id").eq("id_projeto", projIdStr);
+      if (uMat) queryProg = queryProg.eq("matricula_usuario", uMat);
+      const { data: existingProg, error: pErr } = await queryProg.limit(1).maybeSingle();
 
       if (!pErr) {
-        if (existing) {
-          await supabase.from("projeto_progresso").update({
+        if (existingProg) {
+          await supabase.from("projetos_progresso").update({
             status: statusVal,
-            id_epc: epcVal ?? null,
             ...(uMat ? { matricula_usuario: uMat } : {})
-          }).eq("id", existing.id);
+          }).eq("id", existingProg.id);
         } else {
-          await supabase.from("projeto_progresso").insert({
-            id_do_projeto: numId,
-            matricula_usuario: uMat,
-            status: statusVal,
-            id_epc: epcVal ?? null
+          await supabase.from("projetos_progresso").insert({
+            id_projeto: projIdStr,
+            matricula_usuario: uMat || null,
+            status: statusVal
           });
         }
         return;
-      }
-
-      // Fallback 'projeto_progresso' with id_do_usuario or 'projetos_progresso'
-      let query2 = supabase.from("projetos_progresso").select("id").eq("id_do_projeto", numId);
-      if (uMat) query2 = query2.eq("matricula_usuario", uMat);
-      const { data: existing2 } = await query2.limit(1).maybeSingle();
-
-      if (existing2) {
-        await supabase.from("projetos_progresso").update({
-          status: statusVal,
-          id_epc: epcVal ?? null,
-          ...(uMat ? { matricula_usuario: uMat } : {})
-        }).eq("id", existing2.id);
-      } else {
-        await supabase.from("projetos_progresso").insert({
-          id_do_projeto: numId,
-          matricula_usuario: uMat,
-          status: statusVal,
-          id_epc: epcVal ?? null
-        });
       }
     } catch (err) {
       console.error("Erro ao atualizar progresso do projeto:", err);
@@ -741,30 +720,20 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({
 
     if (isSupabaseConfigured && supabase) {
       try {
-        const { data: insertedProj, error: pErr } = await supabase
-          .from("projetos_cursos")
+        const uMat = studentMatricula || null;
+        await supabase
+          .from("projetos")
           .insert({
-            nome_do_projeto: title,
-            descricao: desc
-          })
-          .select()
-          .single();
-
-        if (!pErr && insertedProj) {
-          newId = String(insertedProj.id);
-          const { error: insErr } = await supabase.from("projeto_progresso").insert({
-            id_do_projeto: newId,
-            status: "Não iniciado",
-            id_epc: null
+            id: newId,
+            nome_projeto: title,
+            matricula_usuario: uMat
           });
-          if (insErr) {
-            await supabase.from("projetos_progresso").insert({
-              id_do_projeto: newId,
-              status: "Não iniciado",
-              id_epc: null
-            });
-          }
-        }
+
+        await supabase.from("projetos_progresso").insert({
+          id_projeto: newId,
+          matricula_usuario: uMat,
+          status: "Não iniciado"
+        });
       } catch (err) {
         console.error("Erro ao criar projeto no Supabase:", err);
       }

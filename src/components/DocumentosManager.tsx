@@ -986,35 +986,26 @@ export function DocumentosManager({ allUsers = [], currentAdminName = "Administr
 
     try {
       if (supabase && isSupabaseConfigured) {
-        // Tenta primeiro inserir com id_usuario (se autenticado no auth do supabase)
         let insertErr: any = null;
         let inserted: any = null;
 
         if (currentUserId) {
           const resMat = await supabase
             .from("pastas")
-            .insert({ nome: nomeLimpo, matricula_usuario: currentUserId })
+            .insert({ id: newFolderId, nome: nomeLimpo, matricula_usuario: currentUserId })
             .select()
             .single();
           if (!resMat.error && resMat.data) {
             inserted = resMat.data;
             insertErr = null;
-          } else {
-            const res = await supabase
-              .from("pastas")
-              .insert({ nome: nomeLimpo, id_usuario: currentUserId })
-              .select()
-              .single();
-            insertErr = res.error;
-            inserted = res.data;
           }
         }
 
-        // Se falhou (por exemplo violação de FK auth.users ou sem sessão de auth), insere sem id_usuario
+        // Se falhou (por exemplo sem currentUserId), insere sem matricula_usuario
         if (!inserted || insertErr) {
           const resFallback = await supabase
             .from("pastas")
-            .insert({ nome: nomeLimpo })
+            .insert({ id: newFolderId, nome: nomeLimpo })
             .select()
             .single();
           if (!resFallback.error && resFallback.data) {
@@ -1072,14 +1063,14 @@ export function DocumentosManager({ allUsers = [], currentAdminName = "Administr
               tamanho_titulo: docTamanhoTitulo,
               estilo_titulo: docEstiloTitulo,
               alinhamento_titulo: docAlinhamentoTitulo,
-              pasta_id: docPastaId || null,
+              pasta_id: docPastaId ? parseInt(String(docPastaId).replace(/\D/g, ""), 10) || null : null,
               conteudo: docConteudo.trim(),
               tamanho_conteudo: docTamanhoConteudo,
               alinhamento_conteudo: docAlinhamentoConteudo,
               estilo_conteudo: docEstiloConteudo.trim(),
               incluir_assinatura_programa_certo: incluirAssinaturaProgramaCerto,
               incluir_assinatura_cordenacao: incluirAssinaturaCordenacao,
-              incluir_campo_assinatura_aluno: incluirCampoAssinaturaAluno,
+              incluir_assinatura_aluno: incluirCampoAssinaturaAluno,
               atualizado_em: now,
             })
             .eq("id", editingDocId);
@@ -1118,80 +1109,35 @@ export function DocumentosManager({ allUsers = [], currentAdminName = "Administr
         let newDocId = `doc_${Date.now()}`;
         
         if (supabase && isSupabaseConfigured) {
-          const payloadWithUser: any = {
+          const payloadDoc: any = {
             titulo: docTitulo.trim(),
             tamanho_titulo: docTamanhoTitulo,
             estilo_titulo: docEstiloTitulo,
             alinhamento_titulo: docAlinhamentoTitulo,
-            pasta_id: docPastaId || null,
+            pasta_id: docPastaId ? parseInt(String(docPastaId).replace(/\D/g, ""), 10) || null : null,
             conteudo: docConteudo.trim(),
             tamanho_conteudo: docTamanhoConteudo,
             alinhamento_conteudo: docAlinhamentoConteudo,
             estilo_conteudo: docEstiloConteudo.trim(),
             incluir_assinatura_programa_certo: incluirAssinaturaProgramaCerto,
             incluir_assinatura_cordenacao: incluirAssinaturaCordenacao,
-            incluir_campo_assinatura_aluno: incluirCampoAssinaturaAluno,
+            incluir_assinatura_aluno: incluirCampoAssinaturaAluno,
             status: "emitido",
           };
           if (currentUserId) {
-            payloadWithUser.id_usuario = currentUserId;
+            payloadDoc.matricula_usuario = currentUserId;
           }
 
-          let inserted: any = null;
-          let insertErr: any = null;
-
-          if (currentUserId) {
-            const resMat = await supabase
-              .from("documentos")
-              .insert({ ...payloadWithUser, id_usuario: undefined, matricula_usuario: currentUserId })
-              .select()
-              .single();
-            if (!resMat.error && resMat.data) {
-              inserted = resMat.data;
-              insertErr = null;
-            } else {
-              const res = await supabase
-                .from("documentos")
-                .insert(payloadWithUser)
-                .select()
-                .single();
-              insertErr = res.error;
-              inserted = res.data;
-            }
-          }
-
-          // Se der erro (ex: FK com auth.users), tenta inserir sem id_usuario
-          if (!inserted || insertErr) {
-            const payloadNoUser = {
-              titulo: docTitulo.trim(),
-              tamanho_titulo: docTamanhoTitulo,
-              estilo_titulo: docEstiloTitulo,
-              alinhamento_titulo: docAlinhamentoTitulo,
-              pasta_id: docPastaId || null,
-              conteudo: docConteudo.trim(),
-              tamanho_conteudo: docTamanhoConteudo,
-              alinhamento_conteudo: docAlinhamentoConteudo,
-              estilo_conteudo: docEstiloConteudo.trim(),
-              incluir_assinatura_programa_certo: incluirAssinaturaProgramaCerto,
-              incluir_assinatura_cordenacao: incluirAssinaturaCordenacao,
-              incluir_campo_assinatura_aluno: incluirCampoAssinaturaAluno,
-              status: "emitido",
-            };
-            const resFallback = await supabase
-              .from("documentos")
-              .insert(payloadNoUser)
-              .select()
-              .single();
-            if (!resFallback.error && resFallback.data) {
-              inserted = resFallback.data;
-              insertErr = null;
-            } else if (resFallback.error) {
-              console.error("Erro fatal ao inserir documento no Supabase:", resFallback.error);
-            }
-          }
+          const { data: inserted, error: insertErr } = await supabase
+            .from("documentos")
+            .insert(payloadDoc)
+            .select()
+            .single();
 
           if (inserted?.id) {
-            newDocId = inserted.id;
+            newDocId = String(inserted.id);
+          } else if (insertErr) {
+            console.error("Erro ao inserir documento no Supabase:", insertErr);
           }
         }
 
@@ -1250,27 +1196,19 @@ export function DocumentosManager({ allUsers = [], currentAdminName = "Administr
         if (currentUserId) {
           const resMat = await supabase
             .from("pastas")
-            .insert({ nome: newFolderName.trim(), matricula_usuario: currentUserId })
+            .insert({ id: newFolderId, nome: newFolderName.trim(), matricula_usuario: currentUserId })
             .select()
             .single();
           if (!resMat.error && resMat.data) {
             inserted = resMat.data;
             insertErr = null;
-          } else {
-            const res = await supabase
-              .from("pastas")
-              .insert({ nome: newFolderName.trim(), id_usuario: currentUserId })
-              .select()
-              .single();
-            insertErr = res.error;
-            inserted = res.data;
           }
         }
 
         if (!inserted || insertErr) {
           const resFallback = await supabase
             .from("pastas")
-            .insert({ nome: newFolderName.trim() })
+            .insert({ id: newFolderId, nome: newFolderName.trim() })
             .select()
             .single();
           if (!resFallback.error && resFallback.data) {
@@ -1355,7 +1293,7 @@ export function DocumentosManager({ allUsers = [], currentAdminName = "Administr
           estilo_conteudo: d.estilo_conteudo || "",
           incluir_assinatura_programa_certo: d.incluir_assinatura_programa_certo,
           incluir_assinatura_cordenacao: d.incluir_assinatura_cordenacao,
-          incluir_campo_assinatura_aluno: d.incluir_campo_assinatura_aluno,
+          incluir_assinatura_aluno: d.incluir_assinatura_aluno !== undefined ? d.incluir_assinatura_aluno : d.incluir_campo_assinatura_aluno,
           status: d.status,
         };
 

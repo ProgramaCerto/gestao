@@ -382,11 +382,14 @@ export const NotificacoesManager: React.FC<NotificacoesManagerProps> = ({
         };
 
         if (supabase && isSupabaseConfigured) {
-          const { error } = await supabase
-            .from("notificacoes")
-            .update(payload)
-            .eq("id", editingNotifId);
-          if (error) throw error;
+          const numId = parseInt(String(editingNotifId), 10);
+          if (!isNaN(numId)) {
+            const { error } = await supabase
+              .from("notificacoes")
+              .update(payload)
+              .eq("id", numId);
+            if (error) throw error;
+          }
         }
 
         setNotificacoes((prev) =>
@@ -395,9 +398,28 @@ export const NotificacoesManager: React.FC<NotificacoesManagerProps> = ({
         setFeedback({ type: "success", text: "Notificação atualizada com sucesso!" });
       } else {
         // Modo Criação
-        const newId = `NOTIF-${Date.now()}-${Math.random().toString(36).substring(2, 7).toUpperCase()}`;
-        const payload: NotificacaoItem = {
-          id: newId,
+        const dbPayload = {
+          titulo: titulo.trim(),
+          mensagem: mensagem.trim(),
+          destinatarios: finalDestinatarios,
+          tipo: finalTipo
+        };
+
+        let createdId = `NOTIF-${Date.now()}`;
+        if (supabase && isSupabaseConfigured) {
+          const { data: inserted, error } = await supabase
+            .from("notificacoes")
+            .insert([dbPayload])
+            .select()
+            .single();
+          if (error) throw error;
+          if (inserted?.id) {
+            createdId = String(inserted.id);
+          }
+        }
+
+        const localItem: NotificacaoItem = {
+          id: createdId,
           titulo: titulo.trim(),
           mensagem: mensagem.trim(),
           destinatarios: finalDestinatarios,
@@ -405,12 +427,7 @@ export const NotificacoesManager: React.FC<NotificacoesManagerProps> = ({
           criado_em: new Date().toISOString()
         };
 
-        if (supabase && isSupabaseConfigured) {
-          const { error } = await supabase.from("notificacoes").insert([payload]);
-          if (error) throw error;
-        }
-
-        setNotificacoes((prev) => [payload, ...prev]);
+        setNotificacoes((prev) => [localItem, ...prev]);
         setFeedback({ type: "success", text: "Notificação emitida com sucesso!" });
       }
 

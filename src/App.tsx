@@ -919,27 +919,18 @@ export default function App() {
       const client = getAtendimentoClient();
       if (client) {
         try {
-          const { error: insErr } = await client.from("atendimentos").insert({
+          const ticketPayload: any = {
             id: newTicket.id,
-            matricula_usuario: currentUserMatricula,
+            matricula_usuario: currentUserMatricula || null,
             nome: newTicket.nome,
-            email: newTicket.email,
             tipo: newTicket.tipo,
             mensagem: newTicket.mensagem,
             status: newTicket.status,
             criado_em: newTicket.criado_em
-          });
+          };
+          const { error: insErr } = await client.from("atendimentos").insert(ticketPayload);
           if (insErr) {
-            const validUserId = isValidUUID(currentUserId) ? currentUserId : null;
-            await client.from("atendimentos").insert({
-              id: newTicket.id,
-              id_do_usuario: validUserId,
-              nome: newTicket.nome,
-              tipo: newTicket.tipo,
-              mensagem: newTicket.mensagem,
-              status: newTicket.status,
-              criado_em: newTicket.criado_em
-            });
+            console.error("Erro ao registrar atendimento no Supabase:", insErr);
           }
         } catch (dbErr) {
           console.warn("Aviso ao inserir no Supabase (fallback local ativo):", dbErr);
@@ -2627,11 +2618,19 @@ export default function App() {
             .eq("id_do_curso", dbC.id)
             .order("ordem", { ascending: true });
 
-          const { data: dbAulas } = await supabase
+          let { data: dbAulas } = await supabase
             .from("aulas_dos_cursos")
             .select("*")
             .eq("id_do_curso", dbC.id)
-            .order("aula", { ascending: true });
+            .order("numero_da_aula", { ascending: true });
+          if (!dbAulas) {
+            const fb = await supabase
+              .from("aulas_dos_cursos")
+              .select("*")
+              .eq("id_do_curso", dbC.id)
+              .order("id", { ascending: true });
+            dbAulas = fb.data;
+          }
 
           let parsedModules: { title: string; lessons: Lesson[] }[] = [];
 
@@ -3912,36 +3911,20 @@ export default function App() {
 
       // Gravar diretamente na tabela usuarios do banco de dados usando matricula como chave principal (com acesso sempre Liberado)
       if (supabase) {
+        const createPayload: any = {
+          matricula: newUserMatricula,
+          nome: newUserName.trim(),
+          email: emailFormatted,
+          papel: dbRole,
+          senha: scrambledUserPassword,
+          acesso: "Liberado",
+          data_do_cadastro: nowIso
+        };
+
         let { error: dbErr } = await supabase.from("usuarios").upsert(
-          {
-            matricula: newUserMatricula,
-            nome: newUserName.trim(),
-            email: emailFormatted,
-            papel: dbRole,
-            senha: scrambledUserPassword,
-            acesso: "Liberado",
-            motivo: null,
-            data_do_cadastro: nowIso
-          },
+          createPayload,
           { onConflict: "matricula" }
         );
-
-        if (dbErr) {
-          const fb = await supabase.from("usuarios").upsert(
-            {
-              id: newUserMatricula,
-              nome: newUserName.trim(),
-              email: emailFormatted,
-              papel: dbRole,
-              senha: scrambledUserPassword,
-              acesso: "Liberado",
-              motivo: null,
-              data_do_cadastro: nowIso
-            },
-            { onConflict: "id" }
-          );
-          dbErr = fb.error;
-        }
 
         if (dbErr) {
           console.error("Erro ao criar usuário na tabela usuarios:", dbErr);
@@ -4554,9 +4537,7 @@ export default function App() {
             nome_do_curso: editCourseTitle.trim(),
             descricao: editCourseDescription.trim(),
             categoria: editCourseCategory.trim(),
-            instrutor: editCourseInstructor.trim(),
-            cor_do_gradiente: editCourseGradientColor.trim(),
-            visibilidade: editCourseVisibility
+            gradiente_color: editCourseGradientColor.trim()
           }).eq("id", numericId);
         } catch (err) {
           console.error("Erro ao atualizar curso no Supabase:", err);
@@ -4971,16 +4952,11 @@ export default function App() {
             });
           }
 
-          const { error: ccErr } = await supabase.from("cursos_concluidos").insert({
+          const validNumCourseId = !isNaN(numericCourseId) ? numericCourseId : (Math.abs(course.id.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0)) || 1);
+          await supabase.from("cursos_concluidos").insert({
             matricula_usuario: userMat,
-            id_do_curso: isNaN(numericCourseId) ? course.id : numericCourseId
+            id_do_curso: validNumCourseId
           });
-          if (ccErr) {
-            await supabase.from("cursos_concluidos").insert({
-              id_do_usuario: user.id,
-              id_do_curso: isNaN(numericCourseId) ? course.id : numericCourseId
-            });
-          }
         } catch (err) {
           console.error("Erro ao salvar curso concluído no Supabase:", err);
         }
@@ -5084,9 +5060,7 @@ export default function App() {
           descricao: course.description,
           categoria: course.category,
           aulas: totalAulas,
-          instrutor: studentName,
-          cor_do_gradiente: "from-blue-600 to-indigo-700",
-          visibilidade: "Público"
+          gradiente_color: "from-blue-600 to-indigo-700"
         })
         .select()
         .maybeSingle();
@@ -5096,9 +5070,11 @@ export default function App() {
         for (const mod of course.modules) {
           for (const les of mod.lessons) {
             const firstQuiz = les.quiz?.[0];
+            const currentNum = lessonCounter++;
             await supabase.from("aulas_dos_cursos").insert({
               id_do_curso: insertedC.id,
-              aula: lessonCounter++,
+              numero_da_aula: currentNum,
+              aula: currentNum,
               nome_da_aula: les.title,
               conteudo: les.content,
               nome_do_teste: firstQuiz?.question || null,
@@ -5905,29 +5881,15 @@ export default function App() {
                         const clientAtend = getAtendimentoClient();
                         const blockedMat = extractMatricula(blockedAccountInfo?.matricula || blockedAccountInfo?.id || "");
                         if (clientAtend) {
-                          let { error: insertErr } = await clientAtend.from("atendimentos").insert({
+                          const { error: insertErr } = await clientAtend.from("atendimentos").insert({
                             id: protocolNumber,
                             matricula_usuario: blockedMat || null,
                             nome: blockedAccountInfo?.name || "Usuário",
-                            email: blockedAccountInfo?.email || "",
                             tipo: "Bloqueio de Conta",
                             mensagem: appealExplanation.trim(),
                             status: "Aguardando",
                             criado_em: new Date().toISOString()
                           });
-                          if (insertErr) {
-                            const validUserId = isValidUUID(blockedAccountInfo?.id) ? blockedAccountInfo?.id : null;
-                            const fb = await clientAtend.from("atendimentos").insert({
-                              id: protocolNumber,
-                              id_do_usuario: validUserId,
-                              nome: blockedAccountInfo?.name || "Usuário",
-                              tipo: "Bloqueio de Conta",
-                              mensagem: appealExplanation.trim(),
-                              status: "Aguardando",
-                              criado_em: new Date().toISOString()
-                            });
-                            insertErr = fb.error;
-                          }
                           if (insertErr) {
                             console.error("Erro ao registrar atendimento no Supabase:", insertErr);
                             throw new Error(insertErr.message || "Erro ao registrar atendimento no banco.");
