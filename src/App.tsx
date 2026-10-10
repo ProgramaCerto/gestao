@@ -5657,18 +5657,9 @@ export default function App() {
           </div>
 
           {/* Barra Suave de Progresso Contínuo na Base do Card */}
-          <div className="w-full h-1.5 bg-zinc-100 rounded-full overflow-hidden mb-6 relative">
+          <div className="w-full h-1.5 bg-zinc-100 rounded-full overflow-hidden relative">
             <div className="w-2/5 h-full bg-gradient-to-r from-blue-600 via-[#0b439c] to-indigo-600 rounded-full animate-session-progress" />
           </div>
-
-          {/* Selo Verde de Validação e Ambiente Seguro */}
-          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-emerald-50 border border-emerald-200/90 text-emerald-800 text-xs font-semibold shadow-2xs">
-            <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
-            <span>Conexão criptografada de ponta a ponta</span>
-          </div>
-          <span className="text-[10px] text-zinc-400 font-medium mt-2">
-            Ambiente 100% seguro via HTTPS / TLS 256-bit
-          </span>
         </div>
       </div>
     );
