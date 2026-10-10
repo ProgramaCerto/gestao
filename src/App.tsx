@@ -1556,28 +1556,28 @@ export default function App() {
         const currentPathname = window.location.pathname;
 
         // Update document title dynamically
-        if ((targetPath.startsWith("/atendimento-") || targetPath.startsWith("/atendimento/")) && targetPath.endsWith("/pdf")) document.title = `Comprovante de Atendimento | Programa Certo`;
-        else if (targetPath.startsWith("/atendimento-") || (targetPath.startsWith("/atendimento/") && targetPath !== "/atendimento")) document.title = `Atendimento | Programa Certo`;
-        else if (targetPath === "/entrar") document.title = "Entrar | Programa Certo";
-        else if (targetPath === "/cadastrar") document.title = "Cadastrar | Programa Certo";
-        else if (targetPath === "/perfil") document.title = "Meu Perfil | Programa Certo";
-        else if (targetPath === "/termos-de-uso") document.title = "Termo de Uso e Privacidade | Programa Certo";
-        else if (targetPath === "/atendimento") document.title = "Central de Atendimento | Programa Certo";
-        else if (targetPath === "/documentos") document.title = "Documentos | Programa Certo";
-        else if (targetPath === "/trilhas" || targetPath === "/meus-estudos") document.title = "Meus Estudos | Programa Certo";
-        else if (targetPath === "/cursos") document.title = "Trilha de Estudo | Programa Certo";
-        else if (targetPath === "/meus-projetos") document.title = "Meus Projetos | Programa Certo";
-        else if (targetPath === "/usuarios") document.title = "Usuários | Programa Certo";
-        else if (targetPath === "/gestao-cursos") document.title = "Gestão de Cursos | Programa Certo";
+        if ((targetPath.startsWith("/atendimento-") || targetPath.startsWith("/atendimento/")) && targetPath.endsWith("/pdf")) document.title = `Comprovante de Atendimento | Gestão Cursos Programa Certo`;
+        else if (targetPath.startsWith("/atendimento-") || (targetPath.startsWith("/atendimento/") && targetPath !== "/atendimento")) document.title = `Atendimento | Gestão Cursos Programa Certo`;
+        else if (targetPath === "/entrar") document.title = "Entrar | Gestão Cursos Programa Certo";
+        else if (targetPath === "/cadastrar") document.title = "Cadastrar | Gestão Cursos Programa Certo";
+        else if (targetPath === "/perfil") document.title = "Meu Perfil | Gestão Cursos Programa Certo";
+        else if (targetPath === "/termos-de-uso") document.title = "Termo de Uso e Privacidade | Gestão Cursos Programa Certo";
+        else if (targetPath === "/atendimento") document.title = "Central de Atendimento | Gestão Cursos Programa Certo";
+        else if (targetPath === "/documentos") document.title = "Documentos | Gestão Cursos Programa Certo";
+        else if (targetPath === "/trilhas" || targetPath === "/meus-estudos") document.title = "Meus Estudos | Gestão Cursos Programa Certo";
+        else if (targetPath === "/cursos") document.title = "Trilha de Estudo | Gestão Cursos Programa Certo";
+        else if (targetPath === "/meus-projetos") document.title = "Meus Projetos | Gestão Cursos Programa Certo";
+        else if (targetPath === "/usuarios") document.title = "Usuários | Gestão Cursos Programa Certo";
+        else if (targetPath === "/gestao-cursos") document.title = "Gestão de Cursos | Gestão Cursos Programa Certo";
         else if (selectedCourse && activeTab === "lesson-view") {
           const currentLesson = selectedCourse.modules?.[selectedModuleIndex]?.lessons?.[selectedLessonIndex];
           if (!isViewingCourseInfo && currentLesson?.title) {
-            document.title = `${currentLesson.title} - ${selectedCourse.title} | Programa Certo`;
+            document.title = `${currentLesson.title} - ${selectedCourse.title} | Gestão Cursos Programa Certo`;
           } else {
-            document.title = `${selectedCourse.title} | Programa Certo`;
+            document.title = `${selectedCourse.title} | Gestão Cursos Programa Certo`;
           }
         } else {
-          document.title = "Programa Certo";
+          document.title = "Gestão Cursos Programa Certo";
         }
 
         // Try pushState / replaceState for standard path
@@ -5621,17 +5621,17 @@ export default function App() {
         {/* Card Confiável de Verificação de Sessão */}
         <div className="relative z-10 w-full max-w-[370px] bg-white rounded-2xl border border-zinc-200/90 shadow-xl shadow-blue-950/5 p-7 sm:p-8 flex flex-col items-center text-center transition-all duration-300">
           
-          {/* Identidade Visual Confiável: Logo Oficial do Programa Certo */}
-          <div className="w-20 h-20 rounded-2xl bg-white border border-zinc-200/80 shadow-xs p-2 flex items-center justify-center mb-4 overflow-hidden">
+          {/* Identidade Visual: Logo Oficial Gestão CPC */}
+          <div className="w-20 h-20 mb-4 flex items-center justify-center">
             <img
-              src={LOGO_PROGRAMA_CERTO_BASE64 || "https://0.gravatar.com/userimage/283287275/316ae787b636086c7dcfa0d8c9ef6b77?size=256"}
-              alt="Logo Programa Certo"
-              className="w-full h-full object-contain rounded-xl"
+              src={LOGO_PROGRAMA_CERTO_BASE64 || "/logo-programa-certo.png"}
+              alt="Gestão Cursos Programa Certo"
+              className="w-20 h-20 object-contain drop-shadow-sm select-none"
             />
           </div>
 
           <h2 className="text-lg font-bold text-zinc-900 tracking-tight">
-            Programa Certo
+            Gestão Cursos Programa Certo
           </h2>
           <p className="text-xs text-zinc-500 font-medium mb-5">
             Plataforma Educacional
@@ -5671,20 +5671,20 @@ export default function App() {
       const blockedInitials = getTwoNameInitials(blockedAccountInfo.name || "Usuário");
       return (
         <div className="min-h-screen bg-[#fafafa] text-zinc-900 font-sans flex flex-col selection:bg-blue-100">
-          {/* Header Superior: APENAS Logo Programa Certo à esquerda e Logo da Conta (Iniciais) à direita */}
+          {/* Header Superior: APENAS Logo Gestão Cursos Programa Certo à esquerda e Logo da Conta (Iniciais) à direita */}
           <header className="w-full bg-white border-b border-zinc-200 sticky top-0 z-30 px-4 sm:px-8 py-3.5 flex items-center justify-between shadow-2xs">
-            {/* Logo e Marca Programa Certo */}
+            {/* Logo e Marca Gestão Cursos Programa Certo */}
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-white p-1 border border-zinc-200 shadow-xs flex items-center justify-center overflow-hidden">
+              <div className="w-10 h-10 flex items-center justify-center shrink-0">
                 <img
-                  src="https://0.gravatar.com/userimage/283287275/316ae787b636086c7dcfa0d8c9ef6b77?size=256"
-                  alt="Logo Programa Certo"
-                  className="w-full h-full object-cover rounded-lg"
+                  src={LOGO_PROGRAMA_CERTO_BASE64 || "/logo-programa-certo.png"}
+                  alt="Gestão Cursos Programa Certo"
+                  className="w-10 h-10 object-contain drop-shadow-xs"
                 />
               </div>
               <div className="flex flex-col text-left">
-                <span className="font-display font-black text-lg leading-none text-zinc-900">Programa</span>
-                <span className="font-display font-bold text-sm leading-none text-[#0b439c]">Certo</span>
+                <span className="font-display font-black text-lg leading-none text-zinc-900">Gestão Cursos</span>
+                <span className="font-display font-bold text-sm leading-none text-[#0b439c]">Programa Certo</span>
               </div>
             </div>
 
@@ -6005,20 +6005,20 @@ export default function App() {
       const blockedInitials = getTwoNameInitials(blockedAccountInfo.name || blockedUserTicket?.nome || "Usuário");
       return (
         <div className="min-h-screen bg-[#fafafa] text-zinc-900 font-sans flex flex-col selection:bg-blue-100">
-          {/* Header Superior: APENAS Logo Programa Certo à esquerda e Logo da Conta (Iniciais) à direita */}
+          {/* Header Superior: APENAS Logo Gestão Cursos Programa Certo à esquerda e Logo da Conta (Iniciais) à direita */}
           <header className="w-full bg-white border-b border-zinc-200 sticky top-0 z-30 px-4 sm:px-8 py-3.5 flex items-center justify-between shadow-2xs">
-            {/* Logo e Marca Programa Certo */}
+            {/* Logo e Marca Gestão Cursos Programa Certo */}
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-white p-1 border border-zinc-200 shadow-xs flex items-center justify-center overflow-hidden">
+              <div className="w-10 h-10 flex items-center justify-center shrink-0">
                 <img
-                  src="https://0.gravatar.com/userimage/283287275/316ae787b636086c7dcfa0d8c9ef6b77?size=256"
-                  alt="Logo Programa Certo"
-                  className="w-full h-full object-cover rounded-lg"
+                  src={LOGO_PROGRAMA_CERTO_BASE64 || "/logo-programa-certo.png"}
+                  alt="Gestão Cursos Programa Certo"
+                  className="w-10 h-10 object-contain drop-shadow-xs"
                 />
               </div>
               <div className="flex flex-col text-left">
-                <span className="font-display font-black text-lg leading-none text-zinc-900">Programa</span>
-                <span className="font-display font-bold text-sm leading-none text-[#0b439c]">Certo</span>
+                <span className="font-display font-black text-lg leading-none text-zinc-900">Gestão Cursos</span>
+                <span className="font-display font-bold text-sm leading-none text-[#0b439c]">Programa Certo</span>
               </div>
             </div>
 
@@ -6062,18 +6062,18 @@ export default function App() {
     return (
       <div className="min-h-screen bg-[#fafafa] text-zinc-900 font-sans flex flex-col items-center justify-center p-4 selection:bg-red-100">
         <div className="w-full max-w-lg bg-white rounded-3xl p-6 sm:p-8 border border-red-200/80 shadow-2xl shadow-red-950/10 space-y-6 text-center animate-in fade-in duration-300">
-          {/* Logo e Marca Programa Certo */}
+          {/* Logo e Marca Gestão Cursos Programa Certo */}
           <div className="flex items-center justify-center gap-3">
-            <div className="w-12 h-12 rounded-xl bg-white p-1 border border-zinc-200 shadow-xs flex items-center justify-center overflow-hidden">
+            <div className="w-12 h-12 flex items-center justify-center shrink-0">
               <img
-                src="https://0.gravatar.com/userimage/283287275/316ae787b636086c7dcfa0d8c9ef6b77?size=256"
-                alt="Logo Programa Certo"
-                className="w-full h-full object-cover rounded-lg"
+                src={LOGO_PROGRAMA_CERTO_BASE64 || "/logo-programa-certo.png"}
+                alt="Gestão Cursos Programa Certo"
+                className="w-12 h-12 object-contain drop-shadow-xs"
               />
             </div>
             <div className="flex flex-col text-left">
-              <span className="font-display font-black text-xl leading-none text-zinc-900">Programa</span>
-              <span className="font-display font-bold text-base leading-none text-[#0b439c]">Certo</span>
+              <span className="font-display font-black text-xl leading-none text-zinc-900">Gestão Cursos</span>
+              <span className="font-display font-bold text-base leading-none text-[#0b439c]">Programa Certo</span>
             </div>
           </div>
 
@@ -6263,12 +6263,16 @@ export default function App() {
             <div className="relative z-10 space-y-12">
               {/* Brand Logo */}
               <div className="flex items-center gap-3">
-                <div className="w-12 h-12 rounded bg-white p-0.5 flex items-center justify-center shadow-lg shadow-blue-950/25 overflow-hidden">
-                  <img src="https://0.gravatar.com/userimage/283287275/316ae787b636086c7dcfa0d8c9ef6b77?size=256" alt="Logo Programa Certo" className="w-full h-full object-cover rounded" />
+                <div className="w-12 h-12 flex items-center justify-center shrink-0">
+                  <img
+                    src={LOGO_PROGRAMA_CERTO_BASE64 || "/logo-programa-certo.png"}
+                    alt="Gestão Cursos Programa Certo"
+                    className="w-12 h-12 object-contain drop-shadow-md"
+                  />
                 </div>
                 <div className="flex flex-col text-left">
-                  <span className="font-display font-black text-2xl leading-none tracking-tight">Programa</span>
-                  <span className="font-display font-bold text-lg leading-none text-blue-200">Certo</span>
+                  <span className="font-display font-black text-2xl leading-none tracking-tight">Gestão Cursos</span>
+                  <span className="font-display font-bold text-lg leading-none text-blue-200">Programa Certo</span>
                 </div>
               </div>
 
@@ -6308,10 +6312,17 @@ export default function App() {
             <div className="w-full max-w-md space-y-8">
               {/* Header on mobile */}
               <div className="lg:hidden flex items-center gap-2.5 justify-center mb-6">
-                <div className="w-9 h-9 rounded bg-[#0b439c] flex items-center justify-center text-white font-black text-lg tracking-tighter">
-                  P<span className="text-blue-300">C</span>
+                <div className="w-10 h-10 flex items-center justify-center shrink-0">
+                  <img
+                    src={LOGO_PROGRAMA_CERTO_BASE64 || "/logo-programa-certo.png"}
+                    alt="Gestão Cursos Programa Certo"
+                    className="w-10 h-10 object-contain drop-shadow-xs"
+                  />
                 </div>
-                <span className="font-display font-black text-lg text-[#0b439c]">Programa Certo</span>
+                <div className="flex flex-col text-left">
+                  <span className="font-display font-black text-lg text-[#0b439c] leading-none">Gestão Cursos</span>
+                  <span className="font-display font-bold text-xs text-zinc-600 leading-none mt-1">Programa Certo</span>
+                </div>
               </div>
 
               {/* Form header */}
@@ -6731,21 +6742,21 @@ export default function App() {
         <aside
           className="hidden md:flex md:w-[280px] lg:w-[300px] bg-white border-r border-zinc-200 flex-col shrink-0 h-full min-h-0 max-h-screen z-30"
         >
-            {/* Topo da Barra Lateral: Logo Programa Certo (Apenas visual, não clicável) */}
+            {/* Topo da Barra Lateral: Logo Gestão Cursos Programa Certo (Apenas visual, não clicável) */}
             <div className="p-5 border-b border-zinc-200 flex items-center gap-3 bg-zinc-50/70 select-none cursor-default shrink-0">
-              <div className="w-10 h-10 rounded-xl bg-[#0b439c] flex items-center justify-center shadow-md shadow-blue-900/10 overflow-hidden shrink-0">
+              <div className="w-10 h-10 flex items-center justify-center shrink-0">
                 <img
-                  src="https://0.gravatar.com/userimage/283287275/316ae787b636086c7dcfa0d8c9ef6b77?size=256"
-                  alt="Logo Programa Certo"
-                  className="w-full h-full object-cover pointer-events-none"
+                  src={LOGO_PROGRAMA_CERTO_BASE64 || "/logo-programa-certo.png"}
+                  alt="Gestão Cursos Programa Certo"
+                  className="w-10 h-10 object-contain pointer-events-none drop-shadow-2xs"
                 />
               </div>
               <div className="flex flex-col min-w-0">
                 <span className="font-display font-black text-base text-[#0b439c] leading-none tracking-tight">
-                  Programa Certo
+                  Gestão Cursos
                 </span>
-                <span className="font-display font-semibold text-[11px] text-zinc-500 leading-none mt-1">
-                  Painel Administrativo
+                <span className="font-display font-bold text-[12px] text-zinc-600 leading-none mt-1">
+                  Programa Certo
                 </span>
               </div>
             </div>
@@ -6913,21 +6924,21 @@ export default function App() {
                   <Menu className="w-5 h-5 text-zinc-800" />
                 </button>
 
-                {/* Logo Programa Certo: Apenas visual, ao clicar NÃO FAZ NADA */}
+                {/* Logo Gestão Cursos Programa Certo: Apenas visual, ao clicar NÃO FAZ NADA */}
                 <div className="flex items-center gap-2.5 select-none cursor-default">
-                  <div className="w-9 h-9 rounded-lg bg-[#0b439c] flex items-center justify-center shadow-sm overflow-hidden">
+                  <div className="w-9 h-9 flex items-center justify-center shrink-0">
                     <img
-                      src="https://0.gravatar.com/userimage/283287275/316ae787b636086c7dcfa0d8c9ef6b77?size=256"
-                      alt="Logo Programa Certo"
-                      className="w-full h-full object-cover pointer-events-none"
+                      src={LOGO_PROGRAMA_CERTO_BASE64 || "/logo-programa-certo.png"}
+                      alt="Gestão Cursos Programa Certo"
+                      className="w-9 h-9 object-contain pointer-events-none drop-shadow-2xs"
                     />
                   </div>
                   <div className="flex flex-col">
                     <span className="font-display font-black text-base text-[#0b439c] leading-none">
-                      Programa Certo
+                      Gestão Cursos
                     </span>
-                    <span className="font-display font-semibold text-[10px] text-zinc-500 leading-none mt-0.5">
-                      Painel Administrativo
+                    <span className="font-display font-bold text-[10px] text-zinc-600 leading-none mt-0.5">
+                      Programa Certo
                     </span>
                   </div>
                 </div>
@@ -11871,19 +11882,19 @@ export default function App() {
             >
               <div className="p-5 border-b border-zinc-200 flex items-center justify-between bg-zinc-50 shrink-0">
                 <div className="flex items-center gap-2.5 select-none cursor-default">
-                  <div className="w-9 h-9 rounded-lg bg-[#0b439c] flex items-center justify-center overflow-hidden shadow-sm">
+                  <div className="w-9 h-9 flex items-center justify-center shrink-0">
                     <img
-                      src="https://0.gravatar.com/userimage/283287275/316ae787b636086c7dcfa0d8c9ef6b77?size=256"
-                      alt="Logo Programa Certo"
-                      className="w-full h-full object-cover pointer-events-none"
+                      src={LOGO_PROGRAMA_CERTO_BASE64 || "/logo-programa-certo.png"}
+                      alt="Gestão Cursos Programa Certo"
+                      className="w-9 h-9 object-contain pointer-events-none drop-shadow-2xs"
                     />
                   </div>
                   <div className="flex flex-col">
                     <span className="font-display font-black text-base text-[#0b439c] leading-none">
-                      Programa Certo
+                      Gestão Cursos
                     </span>
-                    <span className="font-display font-semibold text-[11px] text-zinc-500 leading-none mt-0.5">
-                      Painel Administrativo
+                    <span className="font-display font-bold text-[11px] text-zinc-600 leading-none mt-0.5">
+                      Programa Certo
                     </span>
                   </div>
                 </div>

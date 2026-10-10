@@ -1293,7 +1293,7 @@ export function DocumentosManager({ allUsers = [], currentAdminName = "Administr
           estilo_conteudo: d.estilo_conteudo || "",
           incluir_assinatura_programa_certo: d.incluir_assinatura_programa_certo,
           incluir_assinatura_cordenacao: d.incluir_assinatura_cordenacao,
-          incluir_assinatura_aluno: d.incluir_assinatura_aluno !== undefined ? d.incluir_assinatura_aluno : d.incluir_campo_assinatura_aluno,
+          incluir_assinatura_aluno: (d as any).incluir_assinatura_aluno !== undefined ? (d as any).incluir_assinatura_aluno : d.incluir_campo_assinatura_aluno,
           status: d.status,
         };
 

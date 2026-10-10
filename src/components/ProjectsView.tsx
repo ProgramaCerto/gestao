@@ -720,7 +720,21 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({
 
     if (isSupabaseConfigured && supabase) {
       try {
-        const uMat = studentMatricula || null;
+        const { data: authUser } = await supabase.auth.getUser();
+        let uMat: string | null = authUser?.user?.id || null;
+        const uEmail = authUser?.user?.email || "";
+        if (uEmail) {
+          const { data: uRow } = await supabase
+            .from("usuarios")
+            .select("matricula")
+            .ilike("email", uEmail)
+            .limit(1)
+            .maybeSingle();
+          if (uRow?.matricula) {
+            uMat = String(uRow.matricula);
+          }
+        }
+
         await supabase
           .from("projetos")
           .insert({

@@ -297,11 +297,11 @@ export const TicketPdfView: React.FC<TicketPdfViewProps> = ({
 
           {/* Logo e Nome do Documento */}
           <div className="flex items-center gap-2.5 min-w-0">
-            <div className="w-8 h-8 rounded-xl bg-white p-0.5 border border-zinc-700 shadow-xs flex items-center justify-center shrink-0 overflow-hidden">
+            <div className="w-8 h-8 flex items-center justify-center shrink-0">
               <img
                 src={LOGO_PROGRAMA_CERTO_URL}
-                alt="Logo Programa Certo"
-                className="w-full h-full object-cover rounded-lg"
+                alt="Gestão Cursos Programa Certo"
+                className="w-8 h-8 object-contain drop-shadow-xs"
                 onError={(e) => {
                   (e.currentTarget as HTMLImageElement).src = "/logo-programa-certo.png";
                 }}
@@ -310,7 +310,7 @@ export const TicketPdfView: React.FC<TicketPdfViewProps> = ({
             <div className="min-w-0 flex flex-col">
               <div className="flex items-center gap-2">
                 <span className="font-black text-xs sm:text-sm text-white truncate leading-none">
-                  Programa Certo
+                  Gestão Cursos Programa Certo
                 </span>
                 <span className="text-[11px] font-mono font-bold text-blue-400 bg-blue-950/60 px-2 py-0.5 rounded border border-blue-800 shrink-0">
                   {ticket.id}

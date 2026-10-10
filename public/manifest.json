@@ -1,7 +1,7 @@
 {
   "id": "/",
-  "name": "Programa Certo",
-  "short_name": "Prog Certo",
+  "name": "Gestão Cursos Programa Certo",
+  "short_name": "Gestão CPC",
   "description": "Plataforma de ensino de tecnologia com cursos, aulas e projetos práticos.",
   "start_url": "/",
   "scope": "/",
