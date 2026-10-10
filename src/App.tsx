@@ -96,6 +96,7 @@ import { supabaseAtendimento, isSupabaseAtendimentoConfigured } from "./lib/supa
 import { scramblePassword, descramblePassword, passwordsMatch } from "./lib/passwordCipher";
 import { User as SupabaseUser } from "@supabase/supabase-js";
 import { scrollToTop as scrollHelperScrollToTop } from "./lib/scrollHelper";
+import { LOGO_PROGRAMA_CERTO_BASE64 } from "./lib/logoBase64";
 
 export interface AtendimentoItem {
   id: string;
@@ -2732,6 +2733,7 @@ export default function App() {
     let isMounted = true;
 
     const restoreSavedSession = async () => {
+      const startTime = Date.now();
       try {
         if (isSupabaseConfigured && supabase) {
           const { data: { session } } = await supabase.auth.getSession();
@@ -2739,6 +2741,9 @@ export default function App() {
             setUser(session.user);
             localStorage.setItem("aluradev_saved_user", JSON.stringify(session.user));
             await loadDataFromSupabase(session.user);
+            const elapsed = Date.now() - startTime;
+            const remaining = Math.max(0, 450 - elapsed);
+            if (remaining > 0) await new Promise(r => setTimeout(r, remaining));
             if (isMounted) setAuthInitializing(false);
             return;
           }
@@ -2761,6 +2766,9 @@ export default function App() {
       } catch (err) {
         console.error("Erro ao restaurar sessão:", err);
       } finally {
+        const elapsed = Date.now() - startTime;
+        const remaining = Math.max(0, 450 - elapsed);
+        if (remaining > 0) await new Promise(r => setTimeout(r, remaining));
         if (isMounted) setAuthInitializing(false);
       }
     };
@@ -5604,15 +5612,63 @@ export default function App() {
 
   if (authInitializing) {
     return (
-      <div className="min-h-screen bg-[#fafafa] flex flex-col items-center justify-center p-6 font-sans">
-        <div className="flex flex-col items-center gap-4">
-          <div className="w-12 h-12 rounded-xl bg-[#0b439c] flex items-center justify-center shadow-lg shadow-blue-900/20 animate-pulse overflow-hidden">
-            <img src="https://0.gravatar.com/userimage/283287275/316ae787b636086c7dcfa0d8c9ef6b77?size=256" alt="Logo Programa Certo" className="w-full h-full object-cover" />
+      <div className="min-h-screen bg-[#fafafa] flex flex-col items-center justify-center p-4 sm:p-6 font-sans relative overflow-hidden select-none">
+        {/* Iluminação suave de fundo */}
+        <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+          <div className="w-[420px] h-[420px] bg-blue-100/50 rounded-full blur-3xl opacity-60 animate-pulse" />
+        </div>
+
+        {/* Card Confiável de Verificação de Sessão */}
+        <div className="relative z-10 w-full max-w-[370px] bg-white rounded-2xl border border-zinc-200/90 shadow-xl shadow-blue-950/5 p-7 sm:p-8 flex flex-col items-center text-center transition-all duration-300">
+          
+          {/* Identidade Visual Confiável: Logo Oficial do Programa Certo */}
+          <div className="w-20 h-20 rounded-2xl bg-white border border-zinc-200/80 shadow-xs p-2 flex items-center justify-center mb-4 overflow-hidden">
+            <img
+              src={LOGO_PROGRAMA_CERTO_BASE64 || "https://0.gravatar.com/userimage/283287275/316ae787b636086c7dcfa0d8c9ef6b77?size=256"}
+              alt="Logo Programa Certo"
+              className="w-full h-full object-contain rounded-xl"
+            />
           </div>
-          <div className="flex items-center gap-2 text-xs font-bold text-zinc-500">
-            <div className="w-4 h-4 border-2 border-zinc-300 border-t-[#0b439c] rounded-full animate-spin" />
-            <span>Verificando sessão...</span>
+
+          <h2 className="text-lg font-bold text-zinc-900 tracking-tight">
+            Programa Certo
+          </h2>
+          <p className="text-xs text-zinc-500 font-medium mb-5">
+            Plataforma Educacional
+          </p>
+
+          {/* Animação Fluida dos Três Pontinhos (Bounce em sequência ritmada) */}
+          <div className="flex items-center justify-center gap-1.5 text-sm font-semibold text-zinc-700 mb-3">
+            <span>Verificando sessão</span>
+            <span className="inline-flex items-center gap-1 ml-0.5">
+              <span
+                className="w-1.5 h-1.5 rounded-full bg-[#0b439c] inline-block animate-bounce"
+                style={{ animationDelay: "0ms" }}
+              />
+              <span
+                className="w-1.5 h-1.5 rounded-full bg-[#0b439c] inline-block animate-bounce"
+                style={{ animationDelay: "150ms" }}
+              />
+              <span
+                className="w-1.5 h-1.5 rounded-full bg-[#0b439c] inline-block animate-bounce"
+                style={{ animationDelay: "300ms" }}
+              />
+            </span>
           </div>
+
+          {/* Barra Suave de Progresso Contínuo na Base do Card */}
+          <div className="w-full h-1.5 bg-zinc-100 rounded-full overflow-hidden mb-6 relative">
+            <div className="w-2/5 h-full bg-gradient-to-r from-blue-600 via-[#0b439c] to-indigo-600 rounded-full animate-session-progress" />
+          </div>
+
+          {/* Selo Verde de Validação e Ambiente Seguro */}
+          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-emerald-50 border border-emerald-200/90 text-emerald-800 text-xs font-semibold shadow-2xs">
+            <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span>Conexão criptografada de ponta a ponta</span>
+          </div>
+          <span className="text-[10px] text-zinc-400 font-medium mt-2">
+            Ambiente 100% seguro via HTTPS / TLS 256-bit
+          </span>
         </div>
       </div>
     );

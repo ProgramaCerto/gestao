@@ -97,3 +97,14 @@
   -ms-user-select: text !important;
   user-select: text !important;
 }
+
+/* Animação suave para a barra de progresso da verificação de sessão */
+@keyframes sessionProgressSlide {
+  0% { transform: translateX(-100%); }
+  50% { transform: translateX(40%); }
+  100% { transform: translateX(200%); }
+}
+
+.animate-session-progress {
+  animation: sessionProgressSlide 1.4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
