@@ -5626,7 +5626,7 @@ export default function App() {
             <img
               src={LOGO_PROGRAMA_CERTO_BASE64 || "/logo-programa-certo.png"}
               alt="Gestão Cursos Programa Certo"
-              className="w-20 h-20 object-contain drop-shadow-sm select-none"
+              className="w-20 h-20 object-contain rounded-2xl drop-shadow-sm select-none"
             />
           </div>
 
@@ -5679,7 +5679,7 @@ export default function App() {
                 <img
                   src={LOGO_PROGRAMA_CERTO_BASE64 || "/logo-programa-certo.png"}
                   alt="Gestão Cursos Programa Certo"
-                  className="w-10 h-10 object-contain drop-shadow-xs"
+                  className="w-10 h-10 object-contain rounded-xl drop-shadow-xs"
                 />
               </div>
               <div className="flex flex-col text-left">
@@ -6013,7 +6013,7 @@ export default function App() {
                 <img
                   src={LOGO_PROGRAMA_CERTO_BASE64 || "/logo-programa-certo.png"}
                   alt="Gestão Cursos Programa Certo"
-                  className="w-10 h-10 object-contain drop-shadow-xs"
+                  className="w-10 h-10 object-contain rounded-xl drop-shadow-xs"
                 />
               </div>
               <div className="flex flex-col text-left">
@@ -6068,7 +6068,7 @@ export default function App() {
               <img
                 src={LOGO_PROGRAMA_CERTO_BASE64 || "/logo-programa-certo.png"}
                 alt="Gestão Cursos Programa Certo"
-                className="w-12 h-12 object-contain drop-shadow-xs"
+                className="w-12 h-12 object-contain rounded-xl drop-shadow-xs"
               />
             </div>
             <div className="flex flex-col text-left">
@@ -6267,7 +6267,7 @@ export default function App() {
                   <img
                     src={LOGO_PROGRAMA_CERTO_BASE64 || "/logo-programa-certo.png"}
                     alt="Gestão Cursos Programa Certo"
-                    className="w-12 h-12 object-contain drop-shadow-md"
+                    className="w-12 h-12 object-contain rounded-xl drop-shadow-md"
                   />
                 </div>
                 <div className="flex flex-col text-left">
@@ -6316,7 +6316,7 @@ export default function App() {
                   <img
                     src={LOGO_PROGRAMA_CERTO_BASE64 || "/logo-programa-certo.png"}
                     alt="Gestão Cursos Programa Certo"
-                    className="w-10 h-10 object-contain drop-shadow-xs"
+                    className="w-10 h-10 object-contain rounded-xl drop-shadow-xs"
                   />
                 </div>
                 <div className="flex flex-col text-left">
@@ -6748,7 +6748,7 @@ export default function App() {
                 <img
                   src={LOGO_PROGRAMA_CERTO_BASE64 || "/logo-programa-certo.png"}
                   alt="Gestão Cursos Programa Certo"
-                  className="w-10 h-10 object-contain pointer-events-none drop-shadow-2xs"
+                  className="w-10 h-10 object-contain rounded-xl pointer-events-none drop-shadow-2xs"
                 />
               </div>
               <div className="flex flex-col min-w-0">
@@ -6930,7 +6930,7 @@ export default function App() {
                     <img
                       src={LOGO_PROGRAMA_CERTO_BASE64 || "/logo-programa-certo.png"}
                       alt="Gestão Cursos Programa Certo"
-                      className="w-9 h-9 object-contain pointer-events-none drop-shadow-2xs"
+                      className="w-9 h-9 object-contain rounded-lg pointer-events-none drop-shadow-2xs"
                     />
                   </div>
                   <div className="flex flex-col">
@@ -11886,7 +11886,7 @@ export default function App() {
                     <img
                       src={LOGO_PROGRAMA_CERTO_BASE64 || "/logo-programa-certo.png"}
                       alt="Gestão Cursos Programa Certo"
-                      className="w-9 h-9 object-contain pointer-events-none drop-shadow-2xs"
+                      className="w-9 h-9 object-contain rounded-lg pointer-events-none drop-shadow-2xs"
                     />
                   </div>
                   <div className="flex flex-col">

@@ -301,7 +301,7 @@ export const TicketPdfView: React.FC<TicketPdfViewProps> = ({
               <img
                 src={LOGO_PROGRAMA_CERTO_URL}
                 alt="Gestão Cursos Programa Certo"
-                className="w-8 h-8 object-contain drop-shadow-xs"
+                className="w-8 h-8 object-contain rounded-lg drop-shadow-xs"
                 onError={(e) => {
                   (e.currentTarget as HTMLImageElement).src = "/logo-programa-certo.png";
                 }}

@@ -277,8 +277,8 @@ export function SulfiteDocumentSheet({
             <div className="flex items-center gap-3.5 border-b border-zinc-200 pb-4 mb-8">
               <img
                 src={LOGO_PROGRAMA_CERTO_BASE64}
-                alt="Logo Programa Certo"
-                className="w-12 h-12 rounded-xl object-cover shadow-2xs border border-zinc-200/80 shrink-0"
+                alt="Logo Gestão Cursos Programa Certo"
+                className="w-12 h-12 rounded-xl object-contain shadow-2xs border border-zinc-200/80 shrink-0"
               />
               <div className="flex flex-col justify-center">
                 <h1 className="text-xl font-black text-zinc-900 leading-none">
@@ -337,8 +337,8 @@ export function SulfiteDocumentSheet({
                       <div className="flex items-center justify-center gap-1.5 mb-2">
                         <img
                           src={LOGO_PROGRAMA_CERTO_BASE64}
-                          alt="Logo"
-                          className="w-5 h-5 rounded object-cover shrink-0"
+                          alt="Logo Gestão Cursos Programa Certo"
+                          className="w-5 h-5 rounded object-contain shrink-0"
                         />
                         <span className="text-xs font-black text-zinc-900 truncate">
                           Programa <span className="text-[#0b439c]">Certo</span>
