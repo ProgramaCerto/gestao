@@ -164,7 +164,7 @@ function getInitialRouteInfo() {
   let authMode: "login" | "forgot" = "login";
 
 
-  let activeTab: "dashboard" | "usuarios" | "atendimento" | "documentos" | "ocorrencias" | "notificacoes" | "perfil" | "termos" = "dashboard";
+  let activeTab: "dashboard" | "usuarios" | "atendimento" | "documentos" | "ocorrencias" | "notificacoes" | "perfil" | "termos" | "projects" | "cursos_gestao" = "dashboard";
   let courseSlug = "";
   let lessonSlug = "";
   let isViewingCourseInfo = false;
@@ -231,6 +231,10 @@ function getInitialRouteInfo() {
           initialUserMatricula = segments[1];
         }
       }
+    } else if (first === "projetos" || first === "meus-projetos" || first === "editor" || first === "editor-de-codigo") {
+      activeTab = "projects";
+    } else if (first === "cursos" || first === "gestao-cursos" || first === "cursos-gestao") {
+      activeTab = "cursos_gestao";
     } else {
       // Qualquer outro link, subcaminho ou parâmetro sempre cai no dashboard (Darkborg)
       activeTab = "dashboard";
@@ -253,6 +257,7 @@ export default function App() {
 
   // Navigation: 'dashboard' | 'usuarios' | 'atendimento' | 'documentos' | 'ocorrencias' | 'notificacoes' | 'perfil' | 'termos' (restrita aos painéis administrativos)
   const [activeTab, setActiveTab] = useState<"dashboard" | "usuarios" | "atendimento" | "documentos" | "ocorrencias" | "notificacoes" | "perfil" | "termos" | "trilhas" | "courses" | "projects" | "lesson-view" | "cursos_gestao">(initialRoute.activeTab);
+  const [autoOpenEditorInProjects, setAutoOpenEditorInProjects] = useState<boolean>(false);
   const [targetMatriculaForNotif, setTargetMatriculaForNotif] = useState<string>("");
 
   // User Role/Account Type State (Exclusive administrator management panel)
@@ -1221,6 +1226,9 @@ export default function App() {
     setEditingUser(null);
     setEditingUserFromAtendimento(false);
     setIsCreatingUserPage(false);
+    if (tab !== "projects") {
+      setAutoOpenEditorInProjects(false);
+    }
     setActiveTab(tab);
     scrollToTop();
   }, [scrollToTop]);
@@ -1515,6 +1523,8 @@ export default function App() {
       }
       return "/usuarios";
     }
+    if (activeTab === "projects") return "/projetos";
+    if (activeTab === "cursos_gestao") return "/cursos";
     return "/dashboard";
   };
 
@@ -1715,7 +1725,16 @@ export default function App() {
       return;
     }
 
-    // Qualquer outro link ou rota legada (como /cursos, /trilhas, etc.) direciona com segurança para o dashboard
+    if (clean === "projetos" || clean === "meus-projetos" || clean === "editor" || clean === "editor-de-codigo") {
+      setActiveTab("projects");
+      return;
+    }
+    if (clean === "cursos" || clean === "gestao-cursos" || clean === "cursos-gestao") {
+      setActiveTab("cursos_gestao");
+      return;
+    }
+
+    // Qualquer outro link direciona com segurança para o dashboard
     setActiveTab("dashboard");
   };
 
@@ -6276,34 +6295,62 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Tagline */}
+              {/* Tagline & Administrative Presentation */}
               <div className="space-y-4">
-                <h1 className="text-3xl font-black tracking-tight leading-tight">
-                  Aprenda Programação na Prática
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-500/20 text-blue-200 text-xs font-bold uppercase tracking-wider border border-blue-400/30">
+                  Painel de Gestão Administrativa
+                </span>
+                <h1 className="text-3xl font-black tracking-tight leading-tight text-white">
+                  Gestão Cursos Programa Certo
                 </h1>
-                <p className="text-blue-100/80 text-sm leading-relaxed max-w-md">
-                  Seu portal interativo com cursos estruturados, editor de código integrado e projetos práticos para dominar a tecnologia.
+                <p className="text-blue-100/90 text-sm leading-relaxed max-w-md font-medium">
+                  Gerencie o Programa Certo e os cursos do Programa Certo por aqui. Faça seus documentos com segurança, agilidade e controle institucional completo.
                 </p>
               </div>
 
               {/* Value list */}
               <div className="space-y-6">
                 <div className="flex gap-4 items-start">
-                  <div className="p-2 rounded-lg bg-white/10 text-blue-300">
-                    <Code className="w-5 h-5" />
+                  <div className="p-2.5 rounded-xl bg-white/10 text-blue-200 shrink-0">
+                    <FileText className="w-5 h-5" />
                   </div>
                   <div>
-                    <h4 className="font-bold text-sm text-white">Editor & Projetos Práticos</h4>
-                    <p className="text-xs text-blue-200/70 mt-1 leading-relaxed">
-                      Escreva, teste e execute seus códigos diretamente no navegador com nosso ambiente de desenvolvimento de projetos.
+                    <h4 className="font-bold text-sm text-white">Faça seus documentos aqui</h4>
+                    <p className="text-xs text-blue-100/75 mt-1 leading-relaxed">
+                      Emissão ágil de folhas timbradas, comunicados oficiais, ofícios e declarações institucionais com assinaturas validadas.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex gap-4 items-start">
+                  <div className="p-2.5 rounded-xl bg-white/10 text-blue-200 shrink-0">
+                    <BookOpen className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-sm text-white">Gerencie o Programa Certo e os cursos por aqui</h4>
+                    <p className="text-xs text-blue-100/75 mt-1 leading-relaxed">
+                      Gerencie o Programa Certo e os cursos do Programa Certo por aqui: catálogo completo, aulas, módulos, testes e trilhas de formação.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex gap-4 items-start">
+                  <div className="p-2.5 rounded-xl bg-white/10 text-blue-200 shrink-0">
+                    <Users className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-sm text-white">Controle de Alunos, Segurança e Atendimento</h4>
+                    <p className="text-xs text-blue-100/75 mt-1 leading-relaxed">
+                      Supervisão de matrículas, auditoria de ocorrências de segurança e fila prioritária de chamados aos estudantes.
                     </p>
                   </div>
                 </div>
               </div>
             </div>
 
-            <div className="relative z-10 text-xs text-blue-200/50 flex flex-col gap-1">
-              <p className="font-semibold text-blue-200/70">Programa Certo © 2026</p>
+            <div className="relative z-10 text-xs text-blue-200/60 flex flex-col gap-1">
+              <p className="font-semibold text-blue-200/80">Gestão Cursos Programa Certo © 2026</p>
+              <p className="text-[11px] text-blue-300/50">Painel Oficial de Gestão e Emissão de Documentos</p>
             </div>
           </div>
 
@@ -6337,7 +6384,7 @@ export default function App() {
                       : forgotStep === 2
                         ? "Insira o código de 6 dígitos enviado para seu e-mail."
                         : "Defina sua nova senha de acesso à plataforma."
-                    : "Painel exclusivo para administradores e instrutores autorizados. Entre com suas credenciais."
+                    : "Painel exclusivo para administradores e instrutores autorizados. Gerencie o Programa Certo e os cursos por aqui."
                   }
                 </p>
               </div>
@@ -6797,6 +6844,32 @@ export default function App() {
 
               <button
                 type="button"
+                onClick={() => navigateToTab("cursos_gestao")}
+                className={`w-full flex items-center gap-3 px-3.5 py-3 rounded-xl font-bold text-sm transition-all text-left cursor-pointer ${
+                  activeTab === "cursos_gestao"
+                    ? "bg-[#0b439c] text-white shadow-md shadow-blue-900/10"
+                    : "text-zinc-700 hover:bg-zinc-100"
+                }`}
+              >
+                <BookOpen className="w-5 h-5 shrink-0" />
+                <span>GESTÃO DE CURSOS</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => navigateToTab("projects")}
+                className={`w-full flex items-center gap-3 px-3.5 py-3 rounded-xl font-bold text-sm transition-all text-left cursor-pointer ${
+                  activeTab === "projects"
+                    ? "bg-[#0b439c] text-white shadow-md shadow-blue-900/10"
+                    : "text-zinc-700 hover:bg-zinc-100"
+                }`}
+              >
+                <FolderGit2 className="w-5 h-5 shrink-0" />
+                <span>PROJETOS E EDITOR</span>
+              </button>
+
+              <button
+                type="button"
                 onClick={() => navigateToTab("usuarios")}
                 className={`w-full flex items-center gap-3 px-3.5 py-3 rounded-xl font-bold text-sm transition-all text-left cursor-pointer ${
                   activeTab === "usuarios"
@@ -7012,11 +7085,62 @@ export default function App() {
 
             {/* Quick Access Control Board */}
             <div className="bg-white border border-zinc-200 rounded-2xl p-6 shadow-sm space-y-4">
-              <h3 className="font-display font-bold text-base text-zinc-900 flex items-center gap-2">
-                <Sparkles className="w-5 h-5 text-amber-500" />
-                Atalhos de Gestão da Plataforma
-              </h3>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <h3 className="font-display font-bold text-base text-zinc-900 flex items-center gap-2">
+                  <Sparkles className="w-5 h-5 text-amber-500" />
+                  Atalhos de Gestão da Plataforma
+                </h3>
+                <span className="text-xs text-zinc-500 font-medium">
+                  Acesso rápido às ferramentas principais e ambiente prático
+                </span>
+              </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <button
+                  type="button"
+                  onClick={() => navigateToTab("documentos")}
+                  className="p-5 bg-zinc-50 hover:bg-blue-50/50 border border-zinc-200 hover:border-blue-300 rounded-2xl transition-all text-left space-y-1.5 group cursor-pointer"
+                >
+                  <FileText className="w-5 h-5 text-[#0b439c] group-hover:scale-110 transition-transform" />
+                  <h4 className="font-bold text-sm text-zinc-900">Faça seus documentos aqui</h4>
+                  <p className="text-xs text-zinc-500">Emissão e controle de folhas timbradas, comunicados, ofícios e assinaturas oficiais.</p>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => navigateToTab("cursos_gestao")}
+                  className="p-5 bg-zinc-50 hover:bg-blue-50/50 border border-zinc-200 hover:border-blue-300 rounded-2xl transition-all text-left space-y-1.5 group cursor-pointer"
+                >
+                  <BookOpen className="w-5 h-5 text-[#0b439c] group-hover:scale-110 transition-transform" />
+                  <h4 className="font-bold text-sm text-zinc-900">Gerenciar Cursos</h4>
+                  <p className="text-xs text-zinc-500">Gerencie o Programa Certo e os cursos do Programa Certo por aqui: catálogo, módulos e aulas.</p>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAutoOpenEditorInProjects(true);
+                    navigateToTab("projects");
+                  }}
+                  className="p-5 bg-zinc-50 hover:bg-blue-50/50 border border-zinc-200 hover:border-blue-300 rounded-2xl transition-all text-left space-y-1.5 group cursor-pointer"
+                >
+                  <Code className="w-5 h-5 text-[#0b439c] group-hover:scale-110 transition-transform" />
+                  <h4 className="font-bold text-sm text-zinc-900">Editor de Código</h4>
+                  <p className="text-xs text-zinc-500">Ambiente interativo de desenvolvimento web e testes de código diretamente no navegador.</p>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAutoOpenEditorInProjects(false);
+                    navigateToTab("projects");
+                  }}
+                  className="p-5 bg-zinc-50 hover:bg-blue-50/50 border border-zinc-200 hover:border-blue-300 rounded-2xl transition-all text-left space-y-1.5 group cursor-pointer"
+                >
+                  <FolderGit2 className="w-5 h-5 text-[#0b439c] group-hover:scale-110 transition-transform" />
+                  <h4 className="font-bold text-sm text-zinc-900">Projetos Práticos</h4>
+                  <p className="text-xs text-zinc-500">Gestão dos projetos práticos dos cursos, arquivos de código e repositórios GitHub.</p>
+                </button>
+
                 <button
                   type="button"
                   onClick={() => navigateToTab("usuarios")}
@@ -7024,7 +7148,7 @@ export default function App() {
                 >
                   <Users className="w-5 h-5 text-[#0b439c] group-hover:scale-110 transition-transform" />
                   <h4 className="font-bold text-sm text-zinc-900">Controle de Usuários</h4>
-                  <p className="text-xs text-zinc-500">Visualizar contas cadastradas, cargos e status de acesso (Liberado ou Bloqueado).</p>
+                  <p className="text-xs text-zinc-500">Visualizar contas cadastradas, matrículas, cargos e status de acesso (Liberado ou Bloqueado).</p>
                 </button>
 
                 <button
@@ -7035,16 +7159,6 @@ export default function App() {
                   <LifeBuoy className="w-5 h-5 text-[#0b439c] group-hover:scale-110 transition-transform" />
                   <h4 className="font-bold text-sm text-zinc-900">Central de Atendimento</h4>
                   <p className="text-xs text-zinc-500">Fila prioritária de chamados, apelações de bloqueio de conta e respostas oficiais.</p>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => navigateToTab("documentos")}
-                  className="p-5 bg-zinc-50 hover:bg-blue-50/50 border border-zinc-200 hover:border-blue-300 rounded-2xl transition-all text-left space-y-1.5 group cursor-pointer"
-                >
-                  <FileText className="w-5 h-5 text-[#0b439c] group-hover:scale-110 transition-transform" />
-                  <h4 className="font-bold text-sm text-zinc-900">Documentos</h4>
-                  <p className="text-xs text-zinc-500">Emissão e controle de folhas timbradas, comunicados e ofícios da instituição.</p>
                 </button>
 
                 <button
@@ -8058,6 +8172,8 @@ export default function App() {
               selectedTrilhaId={selectedTrilhaId}
               setSelectedTrilhaId={setSelectedTrilhaId}
               trilhas={trilhas}
+              autoOpenEditor={autoOpenEditorInProjects}
+              onCloseEditor={() => setAutoOpenEditorInProjects(false)}
             />
           </motion.div>
         )}
@@ -11941,6 +12057,38 @@ export default function App() {
                 >
                   <Compass className="w-5 h-5" />
                   DASHBOARD
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigateToTab("cursos_gestao");
+                    setIsMobileMenuOpen(false);
+                  }}
+                  className={`w-full flex items-center gap-3 px-3.5 py-3 rounded-xl font-bold text-sm transition-all text-left cursor-pointer ${
+                    activeTab === "cursos_gestao"
+                      ? "bg-[#0b439c] text-white shadow-md shadow-blue-900/10"
+                      : "text-zinc-700 hover:bg-zinc-100"
+                  }`}
+                >
+                  <BookOpen className="w-5 h-5" />
+                  GESTÃO DE CURSOS
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigateToTab("projects");
+                    setIsMobileMenuOpen(false);
+                  }}
+                  className={`w-full flex items-center gap-3 px-3.5 py-3 rounded-xl font-bold text-sm transition-all text-left cursor-pointer ${
+                    activeTab === "projects"
+                      ? "bg-[#0b439c] text-white shadow-md shadow-blue-900/10"
+                      : "text-zinc-700 hover:bg-zinc-100"
+                  }`}
+                >
+                  <FolderGit2 className="w-5 h-5" />
+                  PROJETOS E EDITOR
                 </button>
 
                 <button

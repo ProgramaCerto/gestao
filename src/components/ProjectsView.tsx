@@ -267,12 +267,16 @@ interface ProjectsViewProps {
   selectedTrilhaId?: string | number;
   setSelectedTrilhaId?: (id: any) => void;
   trilhas?: Trilha[];
+  autoOpenEditor?: boolean;
+  onCloseEditor?: () => void;
 }
 
 export const ProjectsView: React.FC<ProjectsViewProps> = ({
   selectedTrilhaId = "",
   setSelectedTrilhaId,
-  trilhas = []
+  trilhas = [],
+  autoOpenEditor = false,
+  onCloseEditor
 }) => {
   // Load stored projects or use defaults
   const [projects, setProjects] = useState<CodeProject[]>(() => {
@@ -336,6 +340,19 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({
 
   const [linkModalProjId, setLinkModalProjId] = useState<string | null>(null);
   const [inputProjectEpc, setInputProjectEpc] = useState("");
+
+  // Automatically open code editor when requested via shortcuts
+  useEffect(() => {
+    if (autoOpenEditor && projects.length > 0) {
+      if (!selectedTrilhaId && trilhas.length > 0 && setSelectedTrilhaId) {
+        setSelectedTrilhaId(String(trilhas[0].id));
+      }
+      const targetProj = projects[0];
+      setActiveProjectId(targetProj.id);
+      setActiveFileName(targetProj.activeFileName || targetProj.files[0]?.name || "index.html");
+      setIsEditorOpen(true);
+    }
+  }, [autoOpenEditor, projects, trilhas, selectedTrilhaId, setSelectedTrilhaId]);
 
   // Save projects to localStorage only when offline / not configured
   useEffect(() => {
@@ -1119,7 +1136,10 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({
               
               <div className="flex items-center gap-3">
                 <button
-                  onClick={() => setIsEditorOpen(false)}
+                  onClick={() => {
+                    setIsEditorOpen(false);
+                    onCloseEditor?.();
+                  }}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-bold transition-all cursor-pointer"
                   title="Voltar para a lista de projetos"
                 >
