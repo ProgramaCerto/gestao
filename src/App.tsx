@@ -2199,396 +2199,13 @@ export default function App() {
     };
   }, [isAnyModalOpen]);
 
-  // Load data from Supabase if authenticated
+  // Load data from Supabase (public courses/tracks/users, and user session if authenticated)
   const loadDataFromSupabase = async (currentUser?: any) => {
-    const targetUser = currentUser || user;
+    const targetUser = currentUser !== undefined ? currentUser : user;
     if (!isSupabaseConfigured || !supabase) return;
+
     try {
-      // 1. Get user profile from 'usuarios' table
-      let userRow: any = null;
-      if (targetUser) {
-        const targetKey = targetUser.matricula || targetUser.id || "";
-        if (targetKey) {
-          const { data: usuarioByMat } = await supabase
-            .from("usuarios")
-            .select("*")
-            .eq("matricula", targetKey)
-            .maybeSingle();
-
-          if (usuarioByMat) {
-            userRow = usuarioByMat;
-          } else {
-            const { data: usuarioById } = await supabase
-              .from("usuarios")
-              .select("*")
-              .eq("id", targetKey)
-              .maybeSingle();
-            if (usuarioById) {
-              userRow = usuarioById;
-            }
-          }
-        }
-
-        if (!userRow && targetUser.email) {
-          const { data: usuarioByEmail } = await supabase
-            .from("usuarios")
-            .select("*")
-            .eq("email", targetUser.email.trim().toLowerCase())
-            .maybeSingle();
-
-          if (usuarioByEmail) {
-            userRow = usuarioByEmail;
-          }
-        }
-      }
-
-      // Fallback check on 'perfis'
-      let legacyProfile: any = null;
-      if (!userRow && targetUser) {
-        const targetKey = targetUser.matricula || targetUser.id || "";
-        const { data: pByMat } = await supabase
-          .from("perfis")
-          .select("*")
-          .eq("matricula_usuario", targetKey)
-          .maybeSingle();
-        if (pByMat) {
-          legacyProfile = pByMat;
-        } else {
-          const { data: pById } = await supabase
-            .from("perfis")
-            .select("*")
-            .eq("id", targetKey)
-            .maybeSingle();
-          legacyProfile = pById;
-        }
-      }
-
-      const isAccountBlocked = userRow && (
-        userRow.acesso === "Bloqueado" ||
-        userRow.status_da_conta === "Bloqueado" ||
-        userRow.status === "Bloqueado"
-      );
-
-      if (isAccountBlocked) {
-        await supabase.auth.signOut().catch(() => {});
-        setUser(null);
-        localStorage.removeItem("aluradev_saved_user");
-        localStorage.removeItem("aluradev_custom_user");
-        localStorage.removeItem("aluradev_saved_guest");
-        const motivoTexto = userRow.motivo_do_bloqueio || userRow.motivo || "Acesso temporariamente bloqueado pela administração.";
-        const resolvedMat = extractMatricula(userRow.matricula || userRow.id || targetUser?.id || "");
-        setBlockedAccountInfo({
-          id: userRow.matricula || userRow.id || targetUser?.id,
-          matricula: resolvedMat,
-          email: targetUser?.email || userRow.email,
-          name: userRow.nome,
-          motivo: motivoTexto
-        });
-        return;
-      }
-
-      let studentNameVal = "";
-      if (userRow?.nome) {
-        studentNameVal = userRow.nome;
-      } else if (legacyProfile?.name) {
-        studentNameVal = legacyProfile.name;
-      } else if (targetUser?.user_metadata?.nome) {
-        studentNameVal = targetUser.user_metadata.nome;
-      } else if (targetUser?.user_metadata?.name) {
-        studentNameVal = targetUser.user_metadata.name;
-      } else if (targetUser?.user_metadata?.full_name) {
-        studentNameVal = targetUser.user_metadata.full_name;
-      } else if (targetUser?.email) {
-        const parts = targetUser.email.split("@")[0].split(/[._-]/).filter(Boolean);
-        studentNameVal = parts.map((p: string) => p.charAt(0).toUpperCase() + p.slice(1).toLowerCase()).join(" ");
-      }
-
-      if (!studentNameVal) {
-        studentNameVal = "Estudante";
-      }
-
-      if (targetUser) {
-        setStudentName(studentNameVal);
-      }
-
-      if (userRow || legacyProfile) {
-        const userPapel = String(userRow?.papel || userRow?.tipo_de_conta || legacyProfile?.cargo || legacyProfile?.account_type || "").toLowerCase();
-        const isAdminRole = userPapel.includes("admin");
-
-        if (!isAdminRole) {
-          await supabase.auth.signOut().catch(() => {});
-          setUser(null);
-          localStorage.removeItem("aluradev_saved_user");
-          localStorage.removeItem("aluradev_custom_user");
-          localStorage.removeItem("aluradev_saved_guest");
-          setAuthError("Acesso restrito: Somente usuários com o papel de Administrador (admin) na tabela de usuários podem entrar neste sistema.");
-          return;
-        }
-
-        setAccountType("administrador");
-
-        // Fetch completed progress
-        if (targetUser) {
-          const userMat = extractMatricula(userRow?.matricula || userRow?.id || targetUser.matricula || targetUser.id || "");
-          const { data: cProgresso } = await supabase
-            .from("progresso")
-            .select("*")
-            .or(`matricula_usuario.eq.${userMat},id_do_usuario.eq.${targetUser.id}`);
-
-          let cLessons: any[] = [];
-          const { data: cAulasByMat } = await supabase
-            .from("aulas_concluidas")
-            .select("*")
-            .eq("matricula_usuario", userMat);
-
-          if (cAulasByMat && cAulasByMat.length > 0) {
-            cLessons = cAulasByMat;
-          } else {
-            const { data: cAulasData } = await supabase
-              .from("aulas_concluidas")
-              .select("*")
-              .eq("id_do_usuario", targetUser.id);
-
-            if (cAulasData && cAulasData.length > 0) {
-              cLessons = cAulasData;
-            } else {
-              const { data: cAtivData } = await supabase
-                .from("atividades_concluidas")
-                .select("*")
-                .eq("id_do_usuario", targetUser.id);
-              if (cAtivData && cAtivData.length > 0) {
-                cLessons = cAtivData;
-              }
-            }
-          }
-
-          let cCourses: any[] = [];
-          const { data: cCoursesByMat } = await supabase
-            .from("cursos_concluidos")
-            .select("*")
-            .eq("matricula_usuario", userMat);
-          if (cCoursesByMat && cCoursesByMat.length > 0) {
-            cCourses = cCoursesByMat;
-          } else {
-            const { data: cCoursesById } = await supabase
-              .from("cursos_concluidos")
-              .select("*")
-              .eq("id_do_usuario", targetUser.id);
-            if (cCoursesById) cCourses = cCoursesById;
-          }
-
-          let completedLessonsKeys: string[] = [];
-          if (cLessons && cLessons.length > 0) {
-            cLessons.forEach((l: any) => {
-              if (l.id_da_aula) {
-                const rawVal = String(l.id_da_aula);
-                completedLessonsKeys.push(rawVal);
-                const numId = parseInt(rawVal, 10);
-                if (!isNaN(numId) && numId >= 1000) {
-                  const cId = Math.floor(numId / 1000);
-                  const rem = numId % 1000;
-                  const mIdx = Math.floor(rem / 100);
-                  const lIdx = (rem % 100) - 1;
-                  completedLessonsKeys.push(`curso-db-${cId}-${mIdx}-${lIdx}`);
-                  completedLessonsKeys.push(`${cId}-${mIdx}-${lIdx}`);
-                }
-              }
-              if (l.course_id !== undefined && l.module_index !== undefined && l.lesson_index !== undefined) {
-                completedLessonsKeys.push(`${l.course_id}-${l.module_index}-${l.lesson_index}`);
-              }
-            });
-          }
-
-          let completedCoursesIds: string[] = [];
-          if (cCourses && cCourses.length > 0) {
-            completedCoursesIds = cCourses.map((c: any) => String(c.id_do_curso || c.course_id));
-          }
-          if (cProgresso && cProgresso.length > 0) {
-            cProgresso.forEach((p: any) => {
-              if (p.status_do_curso === "Concluído" && !completedCoursesIds.includes(String(p.id_do_curso))) {
-                completedCoursesIds.push(String(p.id_do_curso));
-              }
-            });
-          }
-
-          setStats({
-            name: studentNameVal,
-            streak: legacyProfile?.streak || 3,
-            lastStudyDate: legacyProfile?.last_study_date || null,
-            completedLessons: completedLessonsKeys,
-            completedCourses: completedCoursesIds,
-          });
-        }
-      } else if (targetUser) {
-        await supabase.auth.signOut().catch(() => {});
-        setUser(null);
-        localStorage.removeItem("aluradev_saved_user");
-        localStorage.removeItem("aluradev_custom_user");
-        localStorage.removeItem("aluradev_saved_guest");
-        setAuthError("Acesso restrito: Sua conta não possui permissão de Administrador na tabela de usuários.");
-        return;
-      }
-
-      // Always ensure targetUser exists in 'usuarios' table preserving senha and acesso
-      if (targetUser && studentNameVal) {
-        const mappedRole = authRoleSelected === "administrador" ? "Admin" : authRoleSelected === "instrutor" ? "Instrutor" : "Aluno";
-        const roleVal = userRow?.papel || legacyProfile?.account_type || legacyProfile?.cargo || mappedRole;
-        const userMat = extractMatricula(userRow?.matricula || userRow?.id || targetUser.matricula || targetUser.id || "");
-
-        try {
-          if (!userRow) {
-            const createPayload: any = {
-              matricula: userMat,
-              nome: studentNameVal,
-              email: targetUser.email?.trim().toLowerCase() || "",
-              papel: roleVal,
-              acesso: "Liberado",
-              motivo: null,
-              data_do_cadastro: new Date().toISOString()
-            };
-            if (authPassword && authPassword.trim()) {
-              createPayload.senha = scramblePassword(authPassword.trim());
-            }
-            const { error: uErr } = await supabase.from("usuarios").upsert(createPayload, { onConflict: "matricula" });
-            if (uErr) {
-              await supabase.from("usuarios").upsert({ ...createPayload, id: targetUser.id }, { onConflict: "id" });
-            }
-          } else {
-            // Se já existe mas porventura o acesso veio null ou vazio, garante como 'Liberado'
-            const updates: any = {};
-            if (!userRow.acesso) {
-              updates.acesso = "Liberado";
-            }
-            if (!userRow.senha && authPassword && authPassword.trim()) {
-              updates.senha = scramblePassword(authPassword.trim());
-            }
-            if (Object.keys(updates).length > 0) {
-              if (userRow.matricula) {
-                await supabase.from("usuarios").update(updates).eq("matricula", userRow.matricula);
-              } else {
-                await supabase.from("usuarios").update(updates).eq("id", userRow.id);
-              }
-            }
-          }
-
-          if (roleVal.toString().toLowerCase().includes("admin") || roleVal.toString().toLowerCase().includes("instru")) {
-            const { error: pErr } = await supabase.from("perfis").upsert({
-              matricula_usuario: userMat,
-              name: studentNameVal,
-              cargo: roleVal,
-              account_type: roleVal.toString().toLowerCase().includes("admin") ? "administrador" : "instrutor"
-            }, { onConflict: "matricula_usuario" });
-            if (pErr) {
-              await supabase.from("perfis").upsert({
-                id: targetUser.id,
-                name: studentNameVal,
-                cargo: roleVal,
-                account_type: roleVal.toString().toLowerCase().includes("admin") ? "administrador" : "instrutor"
-              }, { onConflict: "id" });
-            }
-          }
-        } catch (e) {
-          console.error("Erro ao sincronizar usuário na tabela usuarios:", e);
-        }
-      }
-
-      // Fetch all registered profiles directly from database tables (usuarios / perfis)
-      const { data: dbUsuarios } = await supabase.from("usuarios").select("*");
-      let fetchedUsers: any[] = [];
-
-      if (dbUsuarios && dbUsuarios.length > 0) {
-        fetchedUsers = dbUsuarios.map(u => {
-          const rawKey = String(u.matricula || u.id || "");
-          const mat = extractMatricula(rawKey);
-          return {
-            id: rawKey || mat,
-            matricula: mat,
-            name: u.nome || "Estudante",
-            nome: u.nome || "Estudante",
-            email: u.email || `${(u.nome || 'estudante').toLowerCase().replace(/\s/g, '')}@gmail.com`,
-            senha: u.senha || "",
-            password: u.senha || "",
-            account_type: (u.papel || u.tipo_de_conta || "").toLowerCase().includes("admin") ? "administrador" : (u.papel || u.tipo_de_conta || "").toLowerCase().includes("instru") ? "instrutor" : "estudante",
-            acesso: (u.acesso === "Bloqueado" || u.status_da_conta === "Bloqueado" || u.status === "Bloqueado") ? "Bloqueado" : "Liberado",
-            status: (u.acesso === "Bloqueado" || u.status_da_conta === "Bloqueado" || u.status === "Bloqueado") ? "Bloqueado" : "Liberado",
-            motivo: u.motivo_do_bloqueio || u.motivo || "",
-            quantidades_bloqueio: u.quantidades_bloqueio !== undefined ? u.quantidades_bloqueio : null,
-            created_at: u.data_do_cadastro ? String(u.data_do_cadastro).split("T")[0] : "2026-07-23"
-          };
-        });
-      } else {
-        const { data: dbProfiles } = await supabase.from("perfis").select("*");
-        if (dbProfiles && dbProfiles.length > 0) {
-          fetchedUsers = dbProfiles.map(p => {
-            const rawKey = String(p.matricula_usuario || p.id || "");
-            const mat = extractMatricula(rawKey);
-            return {
-              id: rawKey || mat,
-              matricula: mat,
-              name: p.name || "Estudante",
-              nome: p.name || "Estudante",
-              email: targetUser && (rawKey === targetUser.id || mat === extractMatricula(targetUser.id || "")) ? targetUser.email : `${(p.name || 'estudante').toLowerCase().replace(/\s/g, '')}@gmail.com`,
-              account_type: (p.account_type || p.cargo || "").toLowerCase().includes("admin") ? "administrador" : (p.account_type || p.cargo || "").toLowerCase().includes("instru") ? "instrutor" : "estudante",
-              acesso: "Liberado",
-              status: "Liberado",
-              motivo: "",
-              created_at: p.last_study_date || "2026-07-14"
-            };
-          });
-        }
-      }
-
-      setAllUsers(fetchedUsers);
-
-      if (targetUser && fetchedUsers.length > 0) {
-        const currentInFetched = fetchedUsers.find(
-          u => (u.id === targetUser.id || u.matricula === targetUser.id || (targetUser.email && u.email && u.email.toLowerCase() === targetUser.email.toLowerCase()))
-        );
-        if (currentInFetched && (currentInFetched.acesso === "Bloqueado" || currentInFetched.status === "Bloqueado")) {
-          await supabase.auth.signOut().catch(() => {});
-          setUser(null);
-          localStorage.removeItem("aluradev_saved_user");
-          localStorage.removeItem("aluradev_custom_user");
-          localStorage.removeItem("aluradev_saved_guest");
-          setBlockedAccountInfo({
-            id: currentInFetched.id || targetUser.id,
-            matricula: currentInFetched.matricula || extractMatricula(currentInFetched.id || targetUser.id || ""),
-            email: currentInFetched.email,
-            name: currentInFetched.name,
-            motivo: currentInFetched.motivo || "Acesso temporariamente bloqueado pela administração."
-          });
-          return;
-        }
-        if (currentInFetched) {
-          const role = (currentInFetched.account_type || "").toLowerCase();
-          if (!role.includes("admin")) {
-            await supabase.auth.signOut().catch(() => {});
-            setUser(null);
-            localStorage.removeItem("aluradev_saved_user");
-            localStorage.removeItem("aluradev_custom_user");
-            localStorage.removeItem("aluradev_saved_guest");
-            setAuthError("Acesso restrito: Somente usuários com o papel de Administrador (admin) na tabela de usuários podem entrar neste sistema.");
-            return;
-          }
-          setAccountType("administrador");
-        }
-      }
-
-      // Fetch turmas
-      const { data: dbTurmas } = await supabase.from("turmas").select("*");
-      if (dbTurmas && dbTurmas.length > 0) {
-        setClasses(dbTurmas.map((t: any) => ({
-          id: String(t.id),
-          name: t.nome_da_turma || t.name || "Turma",
-          course_title: t.nome_do_curso || t.course_title || "Curso",
-          student_count: t.quantidade_de_alunos || t.student_count || 0,
-          instructor_name: t.nome_do_instrutor || t.instructor_name || "Instrutor"
-        })));
-      } else {
-        setClasses([]);
-      }
-
-      // 2. Fetch trilhas from Supabase ('trilha_de_estudo' or fallback 'trilhas')
+      // 1. Fetch trilhas from Supabase ('trilha_de_estudo' or fallback 'trilhas')
       try {
         let { data: dbTrilhas, error: trilhasErr } = await supabase
           .from("trilha_de_estudo")
@@ -2596,8 +2213,10 @@ export default function App() {
           .order("id", { ascending: true });
 
         if (trilhasErr || !dbTrilhas) {
-          const fb = await supabase.from("trilhas").select("*").order("id", { ascending: true });
-          dbTrilhas = fb.data;
+          try {
+            const fb = await supabase.from("trilhas").select("*").order("id", { ascending: true });
+            if (fb.data) dbTrilhas = fb.data;
+          } catch {}
         }
 
         if (dbTrilhas && dbTrilhas.length > 0) {
@@ -2612,140 +2231,298 @@ export default function App() {
           try {
             localStorage.setItem("aluradev_trilhas_cache", JSON.stringify(mappedTrilhas));
           } catch (e) {}
-        } else {
-          setTrilhas([]);
         }
       } catch (errTrilha) {
-        console.error("Erro ao carregar trilhas do Supabase:", errTrilha);
+        console.warn("Aviso ao carregar trilhas do Supabase:", errTrilha);
       }
 
-      // 3. Fetch registered courses from localStorage and Supabase ('cursos')
-      let localCustomCourses: Course[] = [];
+      // 2. Fetch registered courses from Supabase ('cursos') & custom courses
       try {
-        const storedCustom = localStorage.getItem("aluradev_custom_courses");
-        if (storedCustom) localCustomCourses = JSON.parse(storedCustom);
-      } catch (err) {
-        console.error("Erro ao ler aluradev_custom_courses:", err);
+        let localCustomCourses: Course[] = [];
+        try {
+          const storedCustom = localStorage.getItem("aluradev_custom_courses");
+          if (storedCustom) localCustomCourses = JSON.parse(storedCustom);
+        } catch (err) {
+          console.error("Erro ao ler aluradev_custom_courses:", err);
+        }
+
+        let dbCustomCourses: Course[] = [];
+        const { data: dbCursos, error: dbCursosError } = await supabase.from("cursos").select("*");
+
+        if (!dbCursosError && dbCursos && dbCursos.length > 0) {
+          for (const dbC of dbCursos) {
+            const courseIdStr = String(dbC.id).startsWith("curso-db-") ? String(dbC.id) : `curso-db-${dbC.id}`;
+            let dbModulos: any[] = [];
+            try {
+              const { data: mData } = await supabase
+                .from("modulos")
+                .select("*")
+                .eq("id_do_curso", dbC.id)
+                .order("ordem", { ascending: true });
+              if (mData) dbModulos = mData;
+            } catch {}
+
+            let dbAulas: any[] = [];
+            try {
+              const { data: aData } = await supabase
+                .from("aulas_dos_cursos")
+                .select("*")
+                .eq("id_do_curso", dbC.id)
+                .order("numero_da_aula", { ascending: true });
+              if (aData) {
+                dbAulas = aData;
+              } else {
+                const fb = await supabase
+                  .from("aulas_dos_cursos")
+                  .select("*")
+                  .eq("id_do_curso", dbC.id)
+                  .order("id", { ascending: true });
+                if (fb.data) dbAulas = fb.data;
+              }
+            } catch {}
+
+            let parsedModules: { title: string; lessons: Lesson[] }[] = [];
+
+            const mapLesson = (a: any): Lesson => {
+              const quizList: QuizQuestion[] = [];
+              if (a.nome_do_teste) {
+                const opts = [a.alternativa_a, a.alternativa_b, a.alternativa_c, a.alternativa_d].filter(Boolean);
+                const correctIdx = a.alternativa_certa === "A" ? 0 : a.alternativa_certa === "B" ? 1 : a.alternativa_certa === "C" ? 2 : 3;
+                quizList.push({
+                  question: a.nome_do_teste,
+                  options: opts.length > 0 ? opts : ["Opção A", "Opção B", "Opção C", "Opção D"],
+                  correctAnswer: correctIdx >= 0 ? correctIdx : 0,
+                  explanation: "Resposta verificada conforme gabarito do curso."
+                });
+              }
+              return {
+                id: a.id,
+                title: a.nome_da_aula,
+                content: a.conteudo || "Conteúdo em breve.",
+                duration: "15 min",
+                quiz: quizList
+              };
+            };
+
+            if (dbModulos && dbModulos.length > 0) {
+              parsedModules = dbModulos.map((mod: any) => {
+                const moduleLessons = (dbAulas || [])
+                  .filter((a: any) => String(a.id_do_modulo) === String(mod.id) || (!a.id_do_modulo && mod.ordem === 1))
+                  .map(mapLesson);
+
+                return {
+                  title: mod.titulo_do_modulo || mod.nome_do_modulo || "Módulo",
+                  lessons: moduleLessons
+                };
+              });
+            } else if (dbAulas && dbAulas.length > 0) {
+              parsedModules = [
+                {
+                  title: "Módulo Principal",
+                  lessons: dbAulas.map(mapLesson)
+                }
+              ];
+            }
+
+            const cName = dbC.nome_do_curso || dbC.title || "Curso";
+            dbCustomCourses.push({
+              id: courseIdStr,
+              title: cName,
+              description: dbC.descricao || dbC.description || "Sem descrição disponível.",
+              category: dbC.categoria || dbC.category || "Geral",
+              duration: dbC.duration || `${dbC.aulas || (parsedModules[0]?.lessons.length) || 10} Aulas`,
+              instructor: dbC.instrutor || dbC.instructor || "Instrutor da Plataforma",
+              gradientColor: dbC.gradiente_color || dbC.gradient_color || dbC.gradientColor || "#ADD8E6, #000084",
+              visibility: dbC.visibilidade || dbC.visibility || "Público",
+              lessonsCount: dbC.duration || `${(parsedModules[0]?.lessons.length) || 10} Aulas`,
+              id_trilha: dbC.id_trilha !== undefined && dbC.id_trilha !== null ? dbC.id_trilha : (dbC.trilha_id || null),
+              isCustom: true,
+              modules: parsedModules.length > 0 ? parsedModules : [
+                {
+                  title: "Módulo 1: Conteúdo Principal",
+                  lessons: Array.from({ length: 10 }, (_, i) => ({
+                    title: `Aula ${i + 1}: ${cName}`,
+                    duration: "15 min",
+                    content: `# ${cName} - Aula ${i + 1}\n\nConteúdo completo do curso.`,
+                    videoUrl: "https://www.youtube.com/embed/dQw4w9WgXcQ",
+                    quiz: []
+                  }))
+                }
+              ]
+            });
+          }
+
+          const coursesMap = new Map<string, Course>();
+          for (const c of localCustomCourses) {
+            coursesMap.set(c.title.trim().toLowerCase(), c);
+          }
+          for (const c of dbCustomCourses) {
+            coursesMap.set(c.title.trim().toLowerCase(), c);
+          }
+          const mergedCourses = Array.from(coursesMap.values());
+          setCourses(mergedCourses);
+          try {
+            localStorage.setItem("aluradev_courses_cache", JSON.stringify(mergedCourses));
+          } catch (e) {}
+        } else if (localCustomCourses.length > 0) {
+          setCourses(localCustomCourses);
+        }
+      } catch (errCursos) {
+        console.warn("Aviso ao carregar cursos do Supabase:", errCursos);
       }
 
-      let dbCustomCourses: Course[] = [];
-      const { data: dbCursos, error: dbCursosError } = await supabase.from("cursos").select("*");
-
-      if (!dbCursosError && dbCursos) {
-        for (const dbC of dbCursos) {
-          const courseIdStr = String(dbC.id).startsWith("curso-db-") ? String(dbC.id) : `curso-db-${dbC.id}`;
-          const { data: dbModulos } = await supabase
-            .from("modulos")
-            .select("*")
-            .eq("id_do_curso", dbC.id)
-            .order("ordem", { ascending: true });
-
-          let { data: dbAulas } = await supabase
-            .from("aulas_dos_cursos")
-            .select("*")
-            .eq("id_do_curso", dbC.id)
-            .order("numero_da_aula", { ascending: true });
-          if (!dbAulas) {
-            const fb = await supabase
-              .from("aulas_dos_cursos")
-              .select("*")
-              .eq("id_do_curso", dbC.id)
-              .order("id", { ascending: true });
-            dbAulas = fb.data;
-          }
-
-          let parsedModules: { title: string; lessons: Lesson[] }[] = [];
-
-          const mapLesson = (a: any): Lesson => {
-            const quizList: QuizQuestion[] = [];
-            if (a.nome_do_teste) {
-              const opts = [a.alternativa_a, a.alternativa_b, a.alternativa_c, a.alternativa_d].filter(Boolean);
-              const correctIdx = a.alternativa_certa === "A" ? 0 : a.alternativa_certa === "B" ? 1 : a.alternativa_certa === "C" ? 2 : 3;
-              quizList.push({
-                question: a.nome_do_teste,
-                options: opts.length > 0 ? opts : ["Opção A", "Opção B", "Opção C", "Opção D"],
-                correctAnswer: correctIdx >= 0 ? correctIdx : 0,
-                explanation: "Resposta verificada conforme gabarito do curso."
-              });
-            }
+      // 3. Fetch all registered users directly from 'usuarios' table
+      let fetchedUsers: any[] = [];
+      try {
+        const { data: dbUsuarios } = await supabase.from("usuarios").select("*");
+        if (dbUsuarios && dbUsuarios.length > 0) {
+          fetchedUsers = dbUsuarios.map(u => {
+            const rawKey = String(u.matricula || "");
+            const mat = extractMatricula(rawKey);
             return {
-              id: a.id,
-              title: a.nome_da_aula,
-              content: a.conteudo || "Conteúdo em breve.",
-              duration: "15 min",
-              quiz: quizList
+              id: rawKey || mat,
+              matricula: mat,
+              name: u.nome || "Estudante",
+              nome: u.nome || "Estudante",
+              email: u.email || `${(u.nome || 'estudante').toLowerCase().replace(/\s/g, '')}@gmail.com`,
+              senha: u.senha || "",
+              password: u.senha || "",
+              account_type: (u.papel || u.tipo_de_conta || "").toLowerCase().includes("admin") ? "administrador" : (u.papel || u.tipo_de_conta || "").toLowerCase().includes("instru") ? "instrutor" : "estudante",
+              acesso: (u.acesso === "Bloqueado" || u.status_da_conta === "Bloqueado" || u.status === "Bloqueado") ? "Bloqueado" : "Liberado",
+              status: (u.acesso === "Bloqueado" || u.status_da_conta === "Bloqueado" || u.status === "Bloqueado") ? "Bloqueado" : "Liberado",
+              motivo: u.motivo_do_bloqueio || u.motivo || "",
+              quantidades_bloqueio: u.quantidades_bloqueio !== undefined ? u.quantidades_bloqueio : null,
+              created_at: u.data_do_cadastro ? String(u.data_do_cadastro).split("T")[0] : "2026-07-23"
             };
-          };
+          });
+          setAllUsers(fetchedUsers);
+          try {
+            localStorage.setItem("aluradev_all_users", JSON.stringify(fetchedUsers));
+          } catch (e) {}
+        }
+      } catch (errUsers) {
+        console.warn("Aviso ao carregar usuários do Supabase:", errUsers);
+      }
 
-          if (dbModulos && dbModulos.length > 0) {
-            parsedModules = dbModulos.map((mod: any) => {
-              const moduleLessons = (dbAulas || [])
-                .filter((a: any) => String(a.id_do_modulo) === String(mod.id) || (!a.id_do_modulo && mod.ordem === 1))
-                .map(mapLesson);
+      // 4. Safe fetch turmas (guarded)
+      try {
+        const { data: dbTurmas } = await supabase.from("turmas").select("*");
+        if (dbTurmas && dbTurmas.length > 0) {
+          setClasses(dbTurmas.map((t: any) => ({
+            id: String(t.id),
+            name: t.nome_da_turma || t.name || "Turma",
+            course_title: t.nome_do_curso || t.course_title || "Curso",
+            student_count: t.quantidade_de_alunos || t.student_count || 0,
+            instructor_name: t.nome_do_instrutor || t.instructor_name || "Instrutor"
+          })));
+        } else {
+          setClasses([]);
+        }
+      } catch {
+        setClasses([]);
+      }
 
-              return {
-                title: mod.titulo_do_modulo || mod.nome_do_modulo || "Módulo",
-                lessons: moduleLessons
-              };
+      // 5. Handle authenticated user session (if targetUser is provided)
+      if (targetUser) {
+        let userRow: any = null;
+        const targetKey = targetUser.matricula || targetUser.id || "";
+        const targetMat = extractMatricula(targetKey);
+        const targetEmail = targetUser.email?.trim().toLowerCase();
+
+        try {
+          if (targetMat) {
+            const { data } = await supabase.from("usuarios").select("*").eq("matricula", targetMat).maybeSingle();
+            if (data) userRow = data;
+          }
+          if (!userRow && targetKey && targetKey !== targetMat) {
+            const { data } = await supabase.from("usuarios").select("*").eq("matricula", targetKey).maybeSingle();
+            if (data) userRow = data;
+          }
+          if (!userRow && targetEmail) {
+            const { data } = await supabase.from("usuarios").select("*").ilike("email", targetEmail).maybeSingle();
+            if (data) userRow = data;
+          }
+        } catch (errUserCheck) {
+          console.warn("Aviso ao buscar perfil de usuário:", errUserCheck);
+        }
+
+        // Fallback to fetchedUsers in memory
+        if (!userRow && fetchedUsers.length > 0) {
+          const matchInList = fetchedUsers.find(
+            u => (targetMat && u.matricula === targetMat) ||
+                 (targetKey && u.id === targetKey) ||
+                 (targetEmail && u.email && u.email.toLowerCase() === targetEmail)
+          );
+          if (matchInList) {
+            userRow = matchInList;
+          }
+        }
+
+        if (userRow) {
+          const isAccountBlocked = (
+            userRow.acesso === "Bloqueado" ||
+            userRow.status_da_conta === "Bloqueado" ||
+            userRow.status === "Bloqueado"
+          );
+
+          if (isAccountBlocked) {
+            await supabase.auth.signOut().catch(() => {});
+            setUser(null);
+            localStorage.removeItem("aluradev_saved_user");
+            localStorage.removeItem("aluradev_custom_user");
+            localStorage.removeItem("aluradev_saved_guest");
+            const motivoTexto = userRow.motivo_do_bloqueio || userRow.motivo || "Acesso temporariamente bloqueado pela administração.";
+            const resolvedMat = extractMatricula(userRow.matricula || targetUser?.id || "");
+            setBlockedAccountInfo({
+              id: userRow.matricula || targetUser?.id,
+              matricula: resolvedMat,
+              email: targetUser?.email || userRow.email,
+              name: userRow.nome,
+              motivo: motivoTexto
             });
-          } else if (dbAulas && dbAulas.length > 0) {
-            parsedModules = [
-              {
-                title: "Módulo Principal",
-                lessons: dbAulas.map(mapLesson)
-              }
-            ];
+            return;
           }
 
-          const cName = dbC.nome_do_curso || dbC.title || "Curso";
-          dbCustomCourses.push({
-            id: courseIdStr,
-            title: cName,
-            description: dbC.descricao || dbC.description || "Sem descrição disponível.",
-            category: dbC.categoria || dbC.category || "Geral",
-            duration: dbC.duration || `${dbC.aulas || (parsedModules[0]?.lessons.length) || 10} Aulas`,
-            instructor: dbC.instrutor || dbC.instructor || "Instrutor da Plataforma",
-            gradientColor: dbC.gradiente_color || dbC.gradient_color || dbC.gradientColor || "#ADD8E6, #000084",
-            visibility: dbC.visibilidade || dbC.visibility || "Público",
-            lessonsCount: dbC.duration || `${(parsedModules[0]?.lessons.length) || 10} Aulas`,
-            id_trilha: dbC.id_trilha !== undefined && dbC.id_trilha !== null ? dbC.id_trilha : (dbC.trilha_id || null),
-            isCustom: true,
-            modules: parsedModules.length > 0 ? parsedModules : [
-              {
-                title: "Módulo 1: Conteúdo Principal",
-                lessons: Array.from({ length: 10 }, (_, i) => ({
-                  title: `Aula ${i + 1}: ${cName}`,
-                  duration: "15 min",
-                  content: `# ${cName} - Aula ${i + 1}\n\nConteúdo completo do curso.`,
-                  videoUrl: "https://www.youtube.com/embed/dQw4w9WgXcQ",
-                  quiz: []
-                }))
-              }
-            ]
-          });
+          const userPapel = String(userRow.papel || userRow.tipo_de_conta || "").toLowerCase();
+          const isAdminRole = userPapel.includes("admin");
+
+          if (!isAdminRole) {
+            await supabase.auth.signOut().catch(() => {});
+            setUser(null);
+            localStorage.removeItem("aluradev_saved_user");
+            localStorage.removeItem("aluradev_custom_user");
+            localStorage.removeItem("aluradev_saved_guest");
+            setAuthError("Acesso restrito: Somente usuários com o papel de Administrador (admin) na tabela de usuários podem entrar neste sistema.");
+            return;
+          }
+
+          setAccountType("administrador");
+          const studentNameVal = userRow.nome || targetUser.user_metadata?.nome || targetUser.user_metadata?.name || "Estudante";
+          setStudentName(studentNameVal);
+
+          // Safe load completed lessons
+          try {
+            const userMat = extractMatricula(userRow.matricula || targetUser.id || "");
+            const { data: cAulasByMat } = await supabase
+              .from("aulas_concluidas")
+              .select("*")
+              .eq("matricula_usuario", userMat);
+
+            let completedLessonsKeys: string[] = [];
+            if (cAulasByMat && cAulasByMat.length > 0) {
+              completedLessonsKeys = cAulasByMat.map((a: any) => String(a.id_da_aula));
+            }
+
+            setStats(prev => ({
+              ...prev,
+              name: studentNameVal,
+              completedLessons: completedLessonsKeys
+            }));
+          } catch {}
         }
-        const coursesMap = new Map<string, Course>();
-        for (const c of localCustomCourses) {
-          coursesMap.set(c.title.trim().toLowerCase(), c);
-        }
-        for (const c of dbCustomCourses) {
-          coursesMap.set(c.title.trim().toLowerCase(), c);
-        }
-        const mergedCourses = Array.from(coursesMap.values());
-        setCourses(mergedCourses);
-        try {
-          localStorage.setItem("aluradev_courses_cache", JSON.stringify(mergedCourses));
-        } catch (e) {}
-      } else if (localCustomCourses.length > 0) {
-        setCourses(localCustomCourses);
-        try {
-          localStorage.setItem("aluradev_courses_cache", JSON.stringify(localCustomCourses));
-        } catch (e) {}
-      } else {
-        setCourses([]);
       }
     } catch (err) {
-      console.error("Erro ao carregar dados do Supabase:", err);
+      console.error("Erro geral ao carregar dados do Supabase:", err);
     }
   };
 
@@ -2756,33 +2533,35 @@ export default function App() {
     const restoreSavedSession = async () => {
       const startTime = Date.now();
       try {
+        let loadedSessionUser: any = null;
+
         if (isSupabaseConfigured && supabase) {
           const { data: { session } } = await supabase.auth.getSession();
           if (session?.user && isMounted) {
+            loadedSessionUser = session.user;
             setUser(session.user);
             localStorage.setItem("aluradev_saved_user", JSON.stringify(session.user));
-            await loadDataFromSupabase(session.user);
-            const elapsed = Date.now() - startTime;
-            const remaining = Math.max(0, 450 - elapsed);
-            if (remaining > 0) await new Promise(r => setTimeout(r, remaining));
-            if (isMounted) setAuthInitializing(false);
-            return;
           }
         }
 
-        // Fallback: check saved user or guest in localStorage
-        const savedUserStr = localStorage.getItem("aluradev_saved_user") || localStorage.getItem("aluradev_custom_user");
-        const savedGuest = localStorage.getItem("aluradev_saved_guest");
-
-        if (savedUserStr && isMounted) {
-          try {
-            const parsedUser = JSON.parse(savedUserStr);
-            setUser(parsedUser);
-            await loadDataFromSupabase(parsedUser);
-          } catch (e) {
-            console.error("Erro ao carregar usuário salvo:", e);
+        if (!loadedSessionUser) {
+          const savedUserStr = localStorage.getItem("aluradev_saved_user") || localStorage.getItem("aluradev_custom_user");
+          if (savedUserStr && isMounted) {
+            try {
+              const parsedUser = JSON.parse(savedUserStr);
+              loadedSessionUser = parsedUser;
+              setUser(parsedUser);
+            } catch (e) {
+              console.error("Erro ao carregar usuário salvo:", e);
+            }
           }
         }
+
+        // Always sync Supabase data (public courses, study tracks, users and user session)
+        if (isSupabaseConfigured && supabase) {
+          await loadDataFromSupabase(loadedSessionUser || undefined);
+        }
+
         localStorage.removeItem("aluradev_saved_guest");
       } catch (err) {
         console.error("Erro ao restaurar sessão:", err);
@@ -2998,8 +2777,8 @@ export default function App() {
                 try {
                   if (userRecord.matricula) {
                     await supabase.from("usuarios").update({ senha: scramblePassword(authPassword) }).eq("matricula", userRecord.matricula);
-                  } else {
-                    await supabase.from("usuarios").update({ senha: scramblePassword(authPassword) }).eq("id", userRecord.id);
+                  } else if (emailLower) {
+                    await supabase.from("usuarios").update({ senha: scramblePassword(authPassword) }).eq("email", emailLower);
                   }
                 } catch (e) {}
               }
@@ -3016,8 +2795,8 @@ export default function App() {
               try {
                 if (userRecord.matricula) {
                   await supabase.from("usuarios").update({ senha: scramblePassword(authPassword) }).eq("matricula", userRecord.matricula);
-                } else {
-                  await supabase.from("usuarios").update({ senha: scramblePassword(authPassword) }).eq("id", userRecord.id);
+                } else if (emailLower) {
+                  await supabase.from("usuarios").update({ senha: scramblePassword(authPassword) }).eq("email", emailLower);
                 }
               } catch (e) {}
             } else {
@@ -3036,22 +2815,24 @@ export default function App() {
           return;
         }
 
-        // Secondary check on loggedUser matricula/id to be 100% sure it is not blocked
+        // Secondary check on loggedUser matricula/email to be 100% sure it is not blocked
         let postAuthCheck: any = null;
-        const { data: checkByMat } = await supabase
-          .from("usuarios")
-          .select("*")
-          .eq("matricula", loggedUser.matricula || loggedUser.id)
-          .maybeSingle();
-        if (checkByMat) {
-          postAuthCheck = checkByMat;
-        } else {
-          const { data: checkById } = await supabase
+        const targetMat = extractMatricula(loggedUser.matricula || loggedUser.id || "");
+        if (targetMat) {
+          const { data: checkByMat } = await supabase
             .from("usuarios")
             .select("*")
-            .eq("id", loggedUser.id)
+            .eq("matricula", targetMat)
             .maybeSingle();
-          postAuthCheck = checkById;
+          if (checkByMat) postAuthCheck = checkByMat;
+        }
+        if (!postAuthCheck && emailLower) {
+          const { data: checkByEmail } = await supabase
+            .from("usuarios")
+            .select("*")
+            .ilike("email", emailLower)
+            .maybeSingle();
+          postAuthCheck = checkByEmail;
         }
 
         if (postAuthCheck && (postAuthCheck.acesso === "Bloqueado" || postAuthCheck.status === "Bloqueado" || postAuthCheck.status_da_conta === "Bloqueado")) {
@@ -3061,7 +2842,7 @@ export default function App() {
           localStorage.removeItem("aluradev_custom_user");
           localStorage.removeItem("aluradev_saved_guest");
           const motivo = postAuthCheck.motivo_do_bloqueio || postAuthCheck.motivo || "Acesso temporariamente bloqueado pela administração.";
-          const pKey = postAuthCheck.matricula || postAuthCheck.id || loggedUser.id;
+          const pKey = postAuthCheck.matricula || loggedUser.matricula || loggedUser.id;
           setBlockedAccountInfo({
             id: pKey,
             matricula: extractMatricula(pKey || ""),
@@ -3118,36 +2899,19 @@ export default function App() {
             upErr = (await supabase.from("usuarios").upsert(syncPayload, { onConflict: "matricula" })).error;
           }
 
-          if (upErr) {
-            await supabase.from("usuarios").upsert({
-              id: loggedUser.id,
-              nome: nameToUse,
-              email: emailLower,
-              papel: mappedRole,
-              senha: scramblePassword(authPassword),
-              acesso: existingAcesso
-            }, { onConflict: "id" });
-          }
-
           await supabase.from("usuarios").update({
             senha: scramblePassword(authPassword),
             acesso: existingAcesso
           }).eq("email", emailLower);
 
-          const { error: pErr } = await supabase.from("perfis").upsert({
-            matricula_usuario: userMat,
-            name: nameToUse,
-            cargo: mappedRole,
-            account_type: "administrador"
-          }, { onConflict: "matricula_usuario" });
-          if (pErr) {
+          try {
             await supabase.from("perfis").upsert({
-              id: loggedUser.id,
+              matricula_usuario: userMat,
               name: nameToUse,
               cargo: mappedRole,
               account_type: "administrador"
-            }, { onConflict: "id" });
-          }
+            }, { onConflict: "matricula_usuario" });
+          } catch {}
         } catch (err) {
           console.error("Erro ao sincronizar usuario na tabela usuarios:", err);
         }
@@ -3219,10 +2983,7 @@ export default function App() {
             data_do_cadastro: new Date().toISOString()
           };
 
-          const { error: upsertErr } = await supabase.from("usuarios").upsert(userPayload, { onConflict: "matricula" });
-          if (upsertErr) {
-            await supabase.from("usuarios").upsert({ ...userPayload, id: createdMatricula }, { onConflict: "id" });
-          }
+          await supabase.from("usuarios").upsert(userPayload, { onConflict: "matricula" });
 
           // Also guarantee update by email in case a database trigger had created the row without senha and acesso
           await supabase.from("usuarios").update({
@@ -3233,22 +2994,15 @@ export default function App() {
           }).eq("email", emailLower);
 
           if (authRoleSelected === "administrador" || authRoleSelected === "instrutor") {
-            const { error: pErr } = await supabase.from("perfis").upsert({
-              matricula_usuario: createdMatricula,
-              name: nameToUse,
-              email: emailLower,
-              cargo: mappedRole,
-              account_type: authRoleSelected
-            }, { onConflict: "matricula_usuario" });
-            if (pErr) {
+            try {
               await supabase.from("perfis").upsert({
-                id: createdMatricula,
+                matricula_usuario: createdMatricula,
                 name: nameToUse,
                 email: emailLower,
                 cargo: mappedRole,
                 account_type: authRoleSelected
-              }, { onConflict: "id" });
-            }
+              }, { onConflict: "matricula_usuario" });
+            } catch {}
           }
         } catch (e) {
           console.error("Erro ao sincronizar dados do usuário nas tabelas:", e);
@@ -4216,30 +3970,20 @@ export default function App() {
           updatePayload.motivo = blockReason;
           uErr = (await supabase.from("usuarios").update(updatePayload).eq("matricula", targetMat || editingUser.id)).error;
         }
-        if (uErr) {
-          await supabase.from("usuarios").update(updatePayload).eq("id", editingUser.id);
+        if (uErr && emailFormatted) {
+          await supabase.from("usuarios").update(updatePayload).eq("email", emailFormatted);
         }
       } catch (err) {
         console.error("Erro ao atualizar usuário em usuarios:", err);
       }
       try {
-        const { error: pErr } = await supabase.from("perfis").update({
+        await supabase.from("perfis").update({
           name: editUserName.trim(),
           email: emailFormatted,
           account_type: editUserRole,
           cargo: dbRole
         }).eq("matricula_usuario", targetMat || editingUser.id);
-        if (pErr) {
-          await supabase.from("perfis").update({
-            name: editUserName.trim(),
-            email: emailFormatted,
-            account_type: editUserRole,
-            cargo: dbRole
-          }).eq("id", editingUser.id);
-        }
-      } catch (err) {
-        console.error("Erro ao atualizar perfil em perfis:", err);
-      }
+      } catch {}
     }
 
     if (editingUser.id === user?.id || (user?.email && editingUser.email?.toLowerCase() === user.email.toLowerCase())) {
@@ -5302,11 +5046,12 @@ export default function App() {
       const userMat = extractMatricula((user as any)?.matricula || user.id || "", allUsers);
       try {
         const { error: uErr } = await supabase.from("usuarios").update({ nome: newName }).eq("matricula", userMat);
-        if (uErr) await supabase.from("usuarios").update({ nome: newName }).eq("id", user.id);
-        if (accountType === "administrador" || accountType === "instrutor") {
-          const { error: pErr } = await supabase.from("perfis").update({ name: newName }).eq("matricula_usuario", userMat);
-          if (pErr) await supabase.from("perfis").update({ name: newName }).eq("id", user.id);
-        }
+        if (uErr && user.email) await supabase.from("usuarios").update({ nome: newName }).eq("email", user.email);
+        try {
+          if (accountType === "administrador" || accountType === "instrutor") {
+            await supabase.from("perfis").update({ name: newName }).eq("matricula_usuario", userMat);
+          }
+        } catch {}
         await supabase.auth.updateUser({
           data: { nome: newName, name: newName }
         });
@@ -5484,22 +5229,18 @@ export default function App() {
             dbUpdates.senha = scramblePassword(pendingProfileChanges.password);
           }
           const { error: uErr } = await supabase.from("usuarios").update(dbUpdates).eq("matricula", userMat);
-          if (uErr) {
-            await supabase.from("usuarios").update(dbUpdates).eq("id", user.id);
+          if (uErr && (currentEmail || pendingProfileChanges.email)) {
+            await supabase.from("usuarios").update(dbUpdates).eq("email", pendingProfileChanges.email || currentEmail);
           }
 
-          if (accountType === "administrador" || accountType === "instrutor") {
-            const { error: pErr } = await supabase.from("perfis").update({
-              name: pendingProfileChanges.name,
-              ...(pendingProfileChanges.email !== currentEmail ? { email: pendingProfileChanges.email } : {})
-            }).eq("matricula_usuario", userMat);
-            if (pErr) {
+          try {
+            if (accountType === "administrador" || accountType === "instrutor") {
               await supabase.from("perfis").update({
                 name: pendingProfileChanges.name,
                 ...(pendingProfileChanges.email !== currentEmail ? { email: pendingProfileChanges.email } : {})
-              }).eq("id", user.id);
+              }).eq("matricula_usuario", userMat);
             }
-          }
+          } catch {}
         } catch (dbErr) {
           console.error("Erro ao sincronizar dados no Supabase:", dbErr);
         }

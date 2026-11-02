@@ -968,10 +968,18 @@ export function DocumentosManager({ allUsers = [], currentAdminName = "Administr
 
       if (foldersErr) {
         console.warn("Aviso ao carregar pastas do Supabase:", foldersErr.message || foldersErr);
-      } else if (dbFolders) {
-        setFolders(dbFolders);
+      } else if (dbFolders && Array.isArray(dbFolders)) {
+        const mappedFolders: DocFolder[] = dbFolders.map((f: any) => ({
+          id: String(f.id),
+          matricula_usuario: f.matricula_usuario ? String(f.matricula_usuario) : undefined,
+          id_usuario: f.id_usuario ? String(f.id_usuario) : undefined,
+          nome: f.nome || f.nome_pasta || "Nova Pasta",
+          nome_pasta: f.nome_pasta || f.nome || "Nova Pasta",
+          criado_em: f.criado_em || new Date().toISOString(),
+        }));
+        setFolders(mappedFolders);
         try {
-          localStorage.setItem(STORAGE_KEY_FOLDERS, JSON.stringify(dbFolders));
+          localStorage.setItem(STORAGE_KEY_FOLDERS, JSON.stringify(mappedFolders));
         } catch {}
       }
 
@@ -983,10 +991,35 @@ export function DocumentosManager({ allUsers = [], currentAdminName = "Administr
 
       if (docsErr) {
         console.warn("Aviso ao carregar documentos do Supabase:", docsErr.message || docsErr);
-      } else if (dbDocs) {
-        setDocuments(dbDocs);
+      } else if (dbDocs && Array.isArray(dbDocs)) {
+        const mappedDocs: DocumentItem[] = dbDocs.map((d: any) => ({
+          id: String(d.id),
+          matricula_usuario: d.matricula_usuario ? String(d.matricula_usuario) : undefined,
+          id_usuario: d.id_usuario ? String(d.id_usuario) : undefined,
+          pasta_id: d.pasta_id !== null && d.pasta_id !== undefined ? String(d.pasta_id) : null,
+          titulo: d.titulo || "(Sem título)",
+          tamanho_titulo: d.tamanho_titulo || 18,
+          estilo_titulo: d.estilo_titulo === "normal" ? "normal" : "negrito",
+          alinhamento_titulo: d.alinhamento_titulo || "center",
+          conteudo: d.conteudo || "",
+          tamanho_conteudo: d.tamanho_conteudo || 16,
+          alinhamento_conteudo: d.alinhamento_conteudo || "justify",
+          estilo_conteudo: d.estilo_conteudo || "",
+          incluir_assinatura_programa_certo: d.incluir_assinatura_programa_certo !== undefined ? !!d.incluir_assinatura_programa_certo : true,
+          incluir_assinatura_cordenacao: d.incluir_assinatura_cordenacao !== undefined ? !!d.incluir_assinatura_cordenacao : true,
+          incluir_campo_assinatura_aluno: d.incluir_campo_assinatura_aluno !== undefined
+            ? !!d.incluir_campo_assinatura_aluno
+            : !!d.incluir_assinatura_aluno,
+          incluir_assinatura_aluno: d.incluir_assinatura_aluno !== undefined
+            ? !!d.incluir_assinatura_aluno
+            : !!d.incluir_campo_assinatura_aluno,
+          status: d.status || "emitido",
+          criado_em: d.criado_em || new Date().toISOString(),
+          atualizado_em: d.atualizado_em || new Date().toISOString(),
+        }));
+        setDocuments(mappedDocs);
         try {
-          localStorage.setItem(STORAGE_KEY_DOCS, JSON.stringify(dbDocs));
+          localStorage.setItem(STORAGE_KEY_DOCS, JSON.stringify(mappedDocs));
         } catch {}
       }
     } catch (err) {
@@ -1109,7 +1142,7 @@ export function DocumentosManager({ allUsers = [], currentAdminName = "Administr
 
   // Pasta selecionada atualmente
   const currentFolder = useMemo(() => {
-    return folders.find((f) => f.id === currentFolderId) || null;
+    return folders.find((f) => isSameFolder(f.id, currentFolderId)) || null;
   }, [folders, currentFolderId]);
 
   // Documentos a exibir:
@@ -1118,9 +1151,9 @@ export function DocumentosManager({ allUsers = [], currentAdminName = "Administr
   const displayedDocs = useMemo(() => {
     return documents.filter((doc) => {
       if (currentFolderId === null) {
-        if (doc.pasta_id !== null && doc.pasta_id !== "") return false;
+        if (!searchQuery.trim() && !isDocumentOutsideFolder(doc.pasta_id)) return false;
       } else {
-        if (doc.pasta_id !== currentFolderId) return false;
+        if (!isSameFolder(doc.pasta_id, currentFolderId)) return false;
       }
 
       if (searchQuery.trim()) {
@@ -1156,7 +1189,7 @@ export function DocumentosManager({ allUsers = [], currentAdminName = "Administr
   }, [folders, folderInputText]);
 
   const getFolderCount = (fId: string) => {
-    return documents.filter((d) => d.pasta_id === fId).length;
+    return documents.filter((d) => isSameFolder(d.pasta_id, fId)).length;
   };
 
   // Abrir tela de criação de documento
@@ -1467,7 +1500,7 @@ export function DocumentosManager({ allUsers = [], currentAdminName = "Administr
     setDocTitulo(doc.titulo);
     setDocPastaId(doc.pasta_id);
 
-    const docFolder = folders.find((f) => f.id === doc.pasta_id);
+    const docFolder = folders.find((f) => isSameFolder(f.id, doc.pasta_id));
     setFolderInputText(docFolder ? docFolder.nome : "");
     setIsFolderDropdownOpen(false);
 
@@ -2511,7 +2544,7 @@ export function DocumentosManager({ allUsers = [], currentAdminName = "Administr
               <div className="divide-y divide-zinc-100">
                 {displayedDocs.map((doc) => {
                   const isSelected = selectedDocIds.includes(doc.id);
-                  const parentFolder = folders.find((f) => f.id === doc.pasta_id);
+                  const parentFolder = folders.find((f) => isSameFolder(f.id, doc.pasta_id));
 
                   return (
                     <div
