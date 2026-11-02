@@ -671,10 +671,11 @@ export default function App() {
             const emailMap = new Map<string, string>();
             const matriculaMap = new Map<string, string>();
             try {
-              const { data: dbUsers } = await supabase
-                .from("usuarios")
-                .select("*");
-              if (dbUsers && Array.isArray(dbUsers)) {
+              if (supabase) {
+                const { data: dbUsers } = await supabase
+                  .from("usuarios")
+                  .select("*");
+                if (dbUsers && Array.isArray(dbUsers)) {
                 dbUsers.forEach((u: any) => {
                   const uKey = String(u.matricula || u.id || "").trim();
                   const uMat = extractMatricula(uKey);
@@ -686,7 +687,8 @@ export default function App() {
                   if (u.email && uMat) matriculaMap.set(u.email.toLowerCase().trim(), uMat);
                 });
               }
-            } catch (uErr) {
+            }
+          } catch (uErr) {
               console.warn("Aviso ao buscar emails/matrículas para atendimentos:", uErr);
             }
 
@@ -5929,16 +5931,18 @@ export default function App() {
                         const protocolNumber = `REC-${new Date().getFullYear()}-${Math.floor(100000 + Math.random() * 900000)}`;
 
                         try {
-                          await supabase.from("suporte_ouvidoria").insert({
-                            protocolo: protocolNumber,
-                            user_id: blockedAccountInfo?.id || null,
-                            nome: blockedAccountInfo?.name || "Usuário",
-                            email: blockedAccountInfo?.email || "",
-                            motivo_bloqueio: blockedAccountInfo?.motivo || "",
-                            justificativa: appealExplanation.trim(),
-                            status: "Em Análise",
-                            criado_em: new Date().toISOString()
-                          });
+                          if (supabase) {
+                            await supabase.from("suporte_ouvidoria").insert({
+                              protocolo: protocolNumber,
+                              user_id: blockedAccountInfo?.id || null,
+                              nome: blockedAccountInfo?.name || "Usuário",
+                              email: blockedAccountInfo?.email || "",
+                              motivo_bloqueio: blockedAccountInfo?.motivo || "",
+                              justificativa: appealExplanation.trim(),
+                              status: "Em Análise",
+                              criado_em: new Date().toISOString()
+                            });
+                          }
                         } catch (dbErr) {
                           console.warn("Tabela suporte_ouvidoria (opcional):", dbErr);
                         }
@@ -6811,7 +6815,7 @@ export default function App() {
             {/* Cartão do Administrador Conectado (Apenas visual, não clicável) */}
             <div className="p-4 mx-4 mt-4 bg-blue-50/80 border border-blue-100 rounded-2xl flex items-center gap-3 select-none cursor-default shrink-0">
               <div className="w-10 h-10 rounded-full bg-[#0b439c] text-white flex items-center justify-center font-bold text-sm shrink-0 shadow-xs">
-                {studentName.split(" ").filter(Boolean).map(n => n[0]).join("").slice(0, 2).toUpperCase() || "AD"}
+                {studentName.split(" ").filter(Boolean).map((n: string) => n[0]).join("").slice(0, 2).toUpperCase() || "AD"}
               </div>
               <div className="min-w-0 flex-1">
                 <p className="font-bold text-zinc-900 text-sm truncate" title={studentName}>
@@ -10269,7 +10273,7 @@ export default function App() {
               <div className="flex flex-col sm:flex-row items-start sm:items-center gap-6 sm:gap-8 pb-8 border-b border-zinc-100">
                 {/* Avatar / Person's Logo (large, on left side) */}
                 <div className="w-28 h-28 sm:w-36 sm:h-36 rounded-2xl bg-gradient-to-tr from-[#0b439c] via-blue-600 to-indigo-700 text-white flex items-center justify-center font-black text-3xl sm:text-4xl shadow-lg shadow-blue-900/15 shrink-0 border-4 border-white ring-2 ring-blue-100">
-                  {studentName.split(" ").filter(Boolean).map(n => n[0]).join("").slice(0, 2).toUpperCase() || "U"}
+                  {studentName.split(" ").filter(Boolean).map((n: string) => n[0]).join("").slice(0, 2).toUpperCase() || "U"}
                 </div>
 
                 {/* Name, Email, and Role details */}
@@ -12026,7 +12030,7 @@ export default function App() {
 
               <div className="p-4 mx-4 mt-4 bg-blue-50/80 border border-blue-100 rounded-2xl flex items-center gap-3 select-none cursor-default shrink-0">
                 <div className="w-10 h-10 rounded-full bg-[#0b439c] text-white flex items-center justify-center font-bold text-sm shrink-0 shadow-xs">
-                  {studentName.split(" ").filter(Boolean).map(n => n[0]).join("").slice(0, 2).toUpperCase() || "AD"}
+                  {studentName.split(" ").filter(Boolean).map((n: string) => n[0]).join("").slice(0, 2).toUpperCase() || "AD"}
                 </div>
                 <div className="min-w-0 flex-1">
                   <p className="font-bold text-zinc-900 text-sm truncate" title={studentName}>

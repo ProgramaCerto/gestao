@@ -130,9 +130,10 @@ export function buildDocumentPdfDoc(docItem: DocumentItem): any {
     doc.text(tLine, titleX, y + 4, { align: titleAlign as any });
     y += titleLineHeight;
   });
-  y += 5;
+  // Espaço nítido e respirável entre o título e o conteúdo do documento
+  y += 14;
 
-  // 3. CONTEÚDO DO DOCUMENTO (Com tamanho numérico, estilo negrito e quebra de páginas)
+  // 3. CONTEÚDO DO DOCUMENTO (Com tamanho numérico, estilo negrito e quebra de páginas fiel)
   let contentFontSize = 10;
   if (docItem.tamanho_conteudo) {
     const parsed = parseInt(String(docItem.tamanho_conteudo), 10);
@@ -144,12 +145,13 @@ export function buildDocumentPdfDoc(docItem: DocumentItem): any {
       contentFontSize = 12;
     }
   }
-  const contentLineHeight = Math.max(4, contentFontSize * 0.52);
+  const contentLineHeight = Math.max(4.5, contentFontSize * 0.55);
 
   const isAllBold = (docItem.estilo_conteudo || "").trim().toLowerCase() === "tudo" || (docItem.estilo_conteudo || "").trim().toLowerCase() === "todo";
   const defaultFontStyle = isAllBold ? "bold" : "normal";
 
-  const textContent = docItem.conteudo?.trim() || "";
+  // Preserva exatamente o texto sem trim agressivo para respeitar quebras e espaços digitados
+  const textContent = docItem.conteudo ?? "";
   doc.setFontSize(contentFontSize);
   doc.setFont("helvetica", defaultFontStyle);
   doc.setTextColor(39, 39, 42);
@@ -162,28 +164,52 @@ export function buildDocumentPdfDoc(docItem: DocumentItem): any {
   );
 
   const paragraphs = textContent.split("\n");
-  for (const para of paragraphs) {
-    if (!para.trim()) {
-      y += 4;
-      continue;
-    }
+  for (let pIdx = 0; pIdx < paragraphs.length; pIdx++) {
+    const rawPara = paragraphs[pIdx];
+    const pageLimit = hasAnySignature ? maxContentY - 45 : maxContentY - 8;
 
-    const lines: string[] = doc.splitTextToSize(para, contentWidth);
-    for (const line of lines) {
-      const pageLimit = hasAnySignature ? maxContentY - 45 : maxContentY - 8;
+    // Linha em branco (espaçamento intencional / enters sucessivos)
+    if (rawPara === "") {
       if (y + contentLineHeight > pageLimit) {
         y = addNewDocPage();
+        y += 6;
         doc.setFontSize(contentFontSize);
         doc.setFont("helvetica", defaultFontStyle);
         doc.setTextColor(39, 39, 42);
       }
-      doc.text(line, margin, y);
+      y += contentLineHeight;
+      continue;
+    }
+
+    const lines: string[] = doc.splitTextToSize(rawPara, contentWidth);
+    for (const line of lines) {
+      if (y + contentLineHeight > pageLimit) {
+        y = addNewDocPage();
+        y += 6;
+        doc.setFontSize(contentFontSize);
+        doc.setFont("helvetica", defaultFontStyle);
+        doc.setTextColor(39, 39, 42);
+      }
+
+      let lineX = margin;
+      let alignMode: any = "left";
+      if (docItem.alinhamento_conteudo === "center") {
+        lineX = pageWidth / 2;
+        alignMode = "center";
+      } else if (docItem.alinhamento_conteudo === "right") {
+        lineX = rightX;
+        alignMode = "right";
+      } else if (docItem.alinhamento_conteudo === "justify") {
+        lineX = margin;
+        alignMode = "justify";
+      }
+
+      doc.text(line, lineX, y, { align: alignMode });
       y += contentLineHeight;
     }
-    y += 2.5;
   }
 
-  y += 5;
+  y += 4;
 
   // 4. Caixa de Homologação e Assinaturas (Apenas se o documento tiver alguma assinatura selecionada)
   if (hasAnySignature) {

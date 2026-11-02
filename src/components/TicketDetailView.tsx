@@ -404,7 +404,7 @@ export const TicketDetailView: React.FC<TicketDetailViewProps> = ({
                   <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
                     <div className="flex items-center gap-3">
                       <div className="w-10 h-10 rounded-full bg-[#0b439c] text-white flex items-center justify-center font-bold text-sm shadow-xs shrink-0">
-                        {effectiveName.split(" ").filter(Boolean).map(n => n[0]).join("").slice(0, 2).toUpperCase() || "US"}
+                        {effectiveName.split(" ").filter(Boolean).map((n: string) => n[0]).join("").slice(0, 2).toUpperCase() || "US"}
                       </div>
                       <div>
                         <div className="flex items-center gap-2 flex-wrap">

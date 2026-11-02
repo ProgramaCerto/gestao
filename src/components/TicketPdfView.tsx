@@ -55,7 +55,7 @@ export const TicketPdfView: React.FC<TicketPdfViewProps> = ({
         let t = { ...initialTicket };
         const rawMat = t.matricula_usuario || t.user_id || t.id_do_usuario;
         // Se faltar email, busca no usuarios
-        if (!t.email?.trim() && (rawMat || t.nome)) {
+        if (!t.email?.trim() && (rawMat || t.nome) && supabase) {
           try {
             const { data: usr } = await supabase
               .from("usuarios")
@@ -95,7 +95,7 @@ export const TicketPdfView: React.FC<TicketPdfViewProps> = ({
           if (found && isMounted) {
             let t = { ...found };
             const rawMat = t.matricula_usuario || t.user_id || t.id_do_usuario;
-            if (!t.email?.trim() && (rawMat || t.nome)) {
+            if (!t.email?.trim() && (rawMat || t.nome) && supabase) {
               try {
                 const { data: usr } = await supabase
                   .from("usuarios")
@@ -135,7 +135,7 @@ export const TicketPdfView: React.FC<TicketPdfViewProps> = ({
             let userEmail = data.email || "";
             const dbMat = data.matricula_usuario || data.id_do_usuario || data.user_id || "";
             // Buscar email correspondente na tabela usuarios
-            if (!userEmail && (dbMat || data.nome)) {
+            if (!userEmail && (dbMat || data.nome) && supabase) {
               try {
                 const { data: usr } = await supabase
                   .from("usuarios")

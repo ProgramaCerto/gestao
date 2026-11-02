@@ -31,7 +31,12 @@ import {
   AlignJustify,
   Type,
   Plus,
-  Minus
+  Minus,
+  Pencil,
+  Eye,
+  EyeOff,
+  ChevronUp,
+  ChevronDown
 } from "lucide-react";
 import { supabase, isSupabaseConfigured } from "../lib/supabase";
 import { LOGO_PROGRAMA_CERTO_BASE64 } from "../lib/logoBase64";
@@ -113,70 +118,43 @@ export function paginateDocumentContent({
   hasSignatures: boolean;
 }): FormattedA4Page[] {
   // Orçamento vertical em pixels (A4 = 1123px a 96 DPI):
-  // 1123 - padding vertical (88px) - cabeçalho oficial (84px) - rodapé oficial (48px) = ~903px
   const A4_USABLE_HEIGHT = 890;
   const titleCharsPerLine = Math.max(15, Math.floor(670 / (titleSize * 0.58)));
   const titleLinesEst = Math.max(1, Math.ceil(((titulo || "").trim().length || 1) / titleCharsPerLine));
-  const titleHeightEst = (titleLinesEst * titleSize * 1.3) + 32;
+  const titleHeightEst = (titleLinesEst * titleSize * 1.3) + 48; // margem generosa entre título e conteúdo
   const page1MaxHeight = Math.max(220, A4_USABLE_HEIGHT - titleHeightEst);
   const subsequentMaxHeight = A4_USABLE_HEIGHT;
   const SIGN_BOX_HEIGHT = 145;
 
-  const lineHeight = contentSize * 1.8;
+  const lineHeight = contentSize * 1.6;
   const charsPerLine = Math.max(25, Math.floor(670 / (contentSize * 0.52)));
 
-  const textToProcess = (conteudo || "").trim() || "Nenhum conteúdo inserido ainda. O texto digitado aparecerá exatamente nesta folha oficial...";
+  const textToProcess = conteudo ?? "";
   const rawParagraphs = textToProcess.split("\n");
-
-  // Quebrar parágrafos em blocos para permitir fatiamento suave entre folhas
-  const units: string[] = [];
-  for (const para of rawParagraphs) {
-    if (!para.trim()) {
-      units.push(""); // linha em branco
-      continue;
-    }
-    const pLines = Math.max(1, Math.ceil(para.length / charsPerLine));
-    if (pLines <= 3) {
-      units.push(para);
-    } else {
-      const words = para.split(" ");
-      let cur = "";
-      for (const w of words) {
-        const test = cur ? `${cur} ${w}` : w;
-        if (test.length > charsPerLine * 2.5) {
-          units.push(cur);
-          cur = w;
-        } else {
-          cur = test;
-        }
-      }
-      if (cur) units.push(cur);
-    }
-  }
 
   const pages: { segments: string[] }[] = [{ segments: [] }];
   let currentPageIndex = 0;
   let currentUsedHeight = 0;
   const getMaxHeight = (idx: number) => (idx === 0 ? page1MaxHeight : subsequentMaxHeight);
 
-  for (let i = 0; i < units.length; i++) {
-    const unit = units[i];
+  for (let i = 0; i < rawParagraphs.length; i++) {
+    const para = rawParagraphs[i];
     let unitHeight: number;
-    if (!unit) {
-      unitHeight = 18;
+    if (para === "") {
+      unitHeight = lineHeight; // altura de uma linha em branco exata (Enter)
     } else {
-      const uLines = Math.max(1, Math.ceil(unit.length / charsPerLine));
-      unitHeight = (uLines * lineHeight) + 12;
+      const pLines = Math.max(1, Math.ceil(para.length / charsPerLine));
+      unitHeight = pLines * lineHeight;
     }
 
     const maxH = getMaxHeight(currentPageIndex);
 
     if (currentUsedHeight + unitHeight > maxH && pages[currentPageIndex].segments.length > 0) {
       currentPageIndex++;
-      pages.push({ segments: [unit] });
+      pages.push({ segments: [para] });
       currentUsedHeight = unitHeight;
     } else {
-      pages[currentPageIndex].segments.push(unit);
+      pages[currentPageIndex].segments.push(para);
       currentUsedHeight += unitHeight;
     }
   }
@@ -470,34 +448,39 @@ export function SulfiteDocumentSheet({
                       </div>
                     </div>
 
-                    {/* 2. TÍTULO DO DOCUMENTO (APENAS NA PÁGINA 1) */}
+                    {/* 2. TÍTULO DO DOCUMENTO (APENAS NA PÁGINA 1 COM ESPAÇO ELEGANTE ANTES DO CONTEÚDO) */}
                     {page.isFirstPage && (
-                      <h2
-                        style={{
-                          fontSize: `${titleSize}px`,
-                          lineHeight: 1.3,
-                        }}
-                        className={`uppercase tracking-wide text-zinc-900 mb-6 shrink-0 ${
-                          estiloTitulo === "normal" ? "font-semibold" : "font-black"
-                        } ${getAlignClass(alinhamentoTitulo)}`}
-                      >
-                        {titulo.trim() || "(TÍTULO DO DOCUMENTO)"}
-                      </h2>
+                      <div className="mb-8 shrink-0">
+                        <h2
+                          style={{
+                            fontSize: `${titleSize}px`,
+                            lineHeight: 1.3,
+                            fontFamily: "Arial, Helvetica, sans-serif",
+                          }}
+                          className={`uppercase tracking-wide text-zinc-900 ${
+                            estiloTitulo === "normal" ? "font-semibold" : "font-black"
+                          } ${getAlignClass(alinhamentoTitulo)}`}
+                        >
+                          {titulo.trim() || "(TÍTULO DO DOCUMENTO)"}
+                        </h2>
+                      </div>
                     )}
 
-                    {/* 3. CONTEÚDO CORRESPONDENTE A ESTA FOLHA */}
+                    {/* 3. CONTEÚDO CORRESPONDENTE A ESTA FOLHA (Formatação e quebras exatas como digitadas) */}
                     <div
                       style={{
                         fontSize: `${contentSize}px`,
-                        lineHeight: 1.8,
+                        lineHeight: 1.6,
+                        fontFamily: "Arial, Helvetica, sans-serif",
+                        whiteSpace: "pre-wrap",
+                        wordBreak: "break-word",
                       }}
                       className={`text-zinc-800 whitespace-pre-wrap flex-1 overflow-hidden ${getAlignClass(alinhamentoConteudo)}`}
                     >
-                      {page.textSegments.map((segment, sIdx) => (
-                        <p key={sIdx} className={segment ? "mb-3" : "h-4"}>
-                          <RenderFormattedContent content={segment} estiloConteudo={estiloConteudo} />
-                        </p>
-                      ))}
+                      <RenderFormattedContent
+                        content={page.textSegments.join("\n")}
+                        estiloConteudo={estiloConteudo}
+                      />
                     </div>
                   </div>
 
@@ -573,8 +556,6 @@ export function SulfiteDocumentSheet({
         })}
       </div>
     </div>
-  );
-}
   );
 }
 
@@ -736,6 +717,7 @@ function DocumentContentEditor({
   const currentContentSize = parseFontSize(docTamanhoConteudo, 16);
   const isAllBold = docEstiloConteudo.trim().toLowerCase() === "tudo";
   const hasBoldWords = !isAllBold && docEstiloConteudo.trim().length > 0;
+  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
 
   return (
     <div className="space-y-4">
@@ -837,7 +819,8 @@ function DocumentContentEditor({
           rows={10}
           value={docConteudo}
           onChange={(e) => setDocConteudo(e.target.value)}
-          className={`w-full p-4 rounded-xl border border-zinc-300 text-zinc-900 focus:outline-none focus:border-[#0b439c] font-sans text-sm sm:text-base leading-relaxed resize-y bg-zinc-50/40 focus:bg-white ${
+          style={{ fontFamily: "Arial, Helvetica, sans-serif" }}
+          className={`w-full p-4 rounded-xl border border-zinc-300 text-zinc-900 focus:outline-none focus:border-[#0b439c] text-sm sm:text-base leading-relaxed resize-y bg-zinc-50/40 focus:bg-white ${
             isAllBold ? "font-black" : "font-normal"
           }`}
           placeholder="Digite o texto do documento..."
@@ -845,28 +828,71 @@ function DocumentContentEditor({
         />
       </div>
 
-      {/* Pré-visualização do Documento */}
-      <div className="space-y-2 pt-2">
-        <div className="flex items-center justify-between px-1">
-          <span className="text-xs font-black uppercase tracking-wider text-zinc-600 flex items-center gap-1.5">
+      {/* Pré-visualização do Documento (Abre e fecha com botão de ver / ocultar para não precisar rolar até o fim) */}
+      <div className="space-y-3 pt-3 border-t border-zinc-200/80">
+        <div className="flex items-center justify-between px-1 flex-wrap gap-2">
+          <span className="text-xs font-black uppercase tracking-wider text-zinc-700 flex items-center gap-1.5">
             <FileText className="w-3.5 h-3.5 text-[#0b439c]" />
             Pré-visualização do Documento
           </span>
+
+          {/* Botão de Ver / Abrir e Fechar */}
+          <button
+            type="button"
+            onClick={() => setIsPreviewOpen((prev) => !prev)}
+            className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer shadow-2xs border ${
+              isPreviewOpen
+                ? "bg-zinc-100 text-zinc-700 hover:bg-zinc-200 border-zinc-300"
+                : "bg-blue-50 text-[#0b439c] hover:bg-blue-100 border-blue-200/80"
+            }`}
+            title={isPreviewOpen ? "Fechar pré-visualização da folha A4" : "Abrir pré-visualização da folha A4"}
+          >
+            {isPreviewOpen ? (
+              <>
+                <EyeOff className="w-3.5 h-3.5 text-zinc-600" />
+                <span>Fechar</span>
+                <ChevronUp className="w-3.5 h-3.5 text-zinc-400" />
+              </>
+            ) : (
+              <>
+                <Eye className="w-3.5 h-3.5 text-[#0b439c]" />
+                <span>Ver / Abrir</span>
+                <ChevronDown className="w-3.5 h-3.5 text-[#0b439c]" />
+              </>
+            )}
+          </button>
         </div>
 
-        <SulfiteDocumentSheet
-          titulo={docTitulo}
-          tamanhoTitulo={docTamanhoTitulo}
-          estiloTitulo={docEstiloTitulo}
-          alinhamentoTitulo={docAlinhamentoTitulo}
-          conteudo={docConteudo}
-          tamanhoConteudo={docTamanhoConteudo}
-          alinhamentoConteudo={docAlinhamentoConteudo}
-          estiloConteudo={docEstiloConteudo}
-          incluirAssinaturaProgramaCerto={incluirAssinaturaProgramaCerto}
-          incluirAssinaturaCordenacao={incluirAssinaturaCordenacao}
-          incluirCampoAssinaturaAluno={incluirCampoAssinaturaAluno}
-        />
+        {isPreviewOpen ? (
+          <div className="animate-in fade-in zoom-in-98 duration-150">
+            <SulfiteDocumentSheet
+              titulo={docTitulo}
+              tamanhoTitulo={docTamanhoTitulo}
+              estiloTitulo={docEstiloTitulo}
+              alinhamentoTitulo={docAlinhamentoTitulo}
+              conteudo={docConteudo}
+              tamanhoConteudo={docTamanhoConteudo}
+              alinhamentoConteudo={docAlinhamentoConteudo}
+              estiloConteudo={docEstiloConteudo}
+              incluirAssinaturaProgramaCerto={incluirAssinaturaProgramaCerto}
+              incluirAssinaturaCordenacao={incluirAssinaturaCordenacao}
+              incluirCampoAssinaturaAluno={incluirCampoAssinaturaAluno}
+            />
+          </div>
+        ) : (
+          <div
+            onClick={() => setIsPreviewOpen(true)}
+            className="p-3.5 bg-zinc-50 hover:bg-blue-50/50 border border-dashed border-zinc-300 hover:border-blue-300 rounded-2xl flex items-center justify-between text-xs text-zinc-500 hover:text-zinc-700 transition-all cursor-pointer select-none"
+          >
+            <span className="flex items-center gap-2">
+              <FileText className="w-4 h-4 text-zinc-400" />
+              <span>A folha A4 está recolhida. Clique em <strong>Ver / Abrir</strong> para visualizar a folha formatada.</span>
+            </span>
+            <span className="font-bold text-[#0b439c] text-xs shrink-0 flex items-center gap-1">
+              Abrir Folha <ChevronRight className="w-3.5 h-3.5" />
+            </span>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -1460,6 +1486,12 @@ export function DocumentosManager({ allUsers = [], currentAdminName = "Administr
     scrollToTop();
   };
 
+  // Abrir documento diretamente em modo de edição (lapisinho)
+  const handleEditDoc = (doc: DocumentItem) => {
+    handleOpenDocView(doc);
+    setViewDocTab("edit");
+  };
+
   // Duplicar documento selecionado
   const handleDuplicateSelected = async () => {
     if (selectedDocIds.length === 0) return;
@@ -1970,10 +2002,11 @@ export function DocumentosManager({ allUsers = [], currentAdminName = "Administr
                   const docObj = documents.find((d) => d.id === editingDocId);
                   if (docObj) handlePrintDoc(docObj);
                 }}
-                className="px-4 py-2 bg-[#0b439c] hover:bg-blue-800 text-white rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 shadow-xs cursor-pointer"
+                className="p-2.5 bg-[#0b439c] hover:bg-blue-800 text-white rounded-xl transition-all flex items-center justify-center shadow-xs cursor-pointer"
+                title="Imprimir documento"
+                aria-label="Imprimir documento"
               >
                 <Printer className="w-4 h-4" />
-                <span>Imprimir</span>
               </button>
 
               <button
@@ -2019,10 +2052,11 @@ export function DocumentosManager({ allUsers = [], currentAdminName = "Administr
                       const docObj = documents.find((d) => d.id === editingDocId);
                       if (docObj) handlePrintDoc(docObj);
                     }}
-                    className="px-3.5 py-1.5 bg-[#0b439c] text-white hover:bg-blue-800 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-xs"
+                    className="p-2 bg-[#0b439c] text-white hover:bg-blue-800 rounded-lg transition-all flex items-center justify-center cursor-pointer shadow-xs"
+                    title="Imprimir documento"
+                    aria-label="Imprimir documento"
                   >
-                    <Printer className="w-3.5 h-3.5" />
-                    <span>Imprimir</span>
+                    <Printer className="w-4 h-4" />
                   </button>
                 </div>
               </div>
@@ -2559,33 +2593,51 @@ export function DocumentosManager({ allUsers = [], currentAdminName = "Administr
                           <span>Pré-visualizar</span>
                         </button>
 
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            openDocumentPdfInBrowser(doc);
-                          }}
-                          className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-100 hover:text-white rounded-lg font-bold text-xs transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs border border-zinc-700"
-                          title="Abrir em PDF na Web sem baixar"
-                        >
-                          <ExternalLink className="w-3.5 h-3.5 text-blue-400" />
-                          <span>Abrir na Web</span>
-                        </button>
-
+                        {/* 1. Imprimir (Apenas ícone de impressão) */}
                         <button
                           type="button"
                           onClick={(e) => {
                             e.stopPropagation();
                             handlePrintDoc(doc);
                           }}
-                          className="px-3 py-1.5 bg-zinc-100 hover:bg-[#0b439c] hover:text-white rounded-lg text-zinc-700 font-bold text-xs transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs"
-                          title="Imprimir formatado"
+                          className="p-2 bg-blue-50 hover:bg-[#0b439c] text-[#0b439c] hover:text-white rounded-xl transition-all flex items-center justify-center cursor-pointer shadow-2xs border border-blue-200/80"
+                          title="Imprimir documento"
+                          aria-label="Imprimir documento"
                         >
-                          <Printer className="w-3.5 h-3.5" />
-                          <span>Imprimir</span>
+                          <Printer className="w-4 h-4" />
                         </button>
 
+                        {/* 2. Lapisinho (Editar documento) */}
                         <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleEditDoc(doc);
+                          }}
+                          className="p-2 bg-amber-50 hover:bg-amber-600 text-amber-700 hover:text-white rounded-xl transition-all flex items-center justify-center cursor-pointer shadow-2xs border border-amber-200/80"
+                          title="Editar documento"
+                          aria-label="Editar documento"
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </button>
+
+                        {/* 3. Abrir em PDF na Web */}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openDocumentPdfInBrowser(doc);
+                          }}
+                          className="p-2 bg-zinc-100 hover:bg-zinc-800 text-zinc-700 hover:text-white rounded-xl transition-all flex items-center justify-center cursor-pointer shadow-2xs border border-zinc-200"
+                          title="Abrir em PDF na Web"
+                          aria-label="Abrir em PDF na Web"
+                        >
+                          <ExternalLink className="w-4 h-4" />
+                        </button>
+
+                        {/* 4. Lixeirinho (Excluir documento) */}
+                        <button
+                          type="button"
                           onClick={(e) => {
                             e.stopPropagation();
                             setDeleteConfirmation({
@@ -2595,8 +2647,9 @@ export function DocumentosManager({ allUsers = [], currentAdminName = "Administr
                               title: doc.titulo,
                             });
                           }}
-                          className="p-1.5 text-zinc-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
-                          title="Apagar"
+                          className="p-2 text-zinc-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-all flex items-center justify-center cursor-pointer border border-transparent hover:border-rose-200"
+                          title="Excluir documento"
+                          aria-label="Excluir documento"
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>
