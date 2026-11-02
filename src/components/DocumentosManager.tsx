@@ -42,6 +42,7 @@ export interface DocFolder {
   matricula_usuario?: string;
   id_usuario?: string;
   nome: string;
+  nome_pasta?: string;
   criado_em: string;
 }
 
@@ -61,9 +62,145 @@ export interface DocumentItem {
   incluir_assinatura_programa_certo: boolean;
   incluir_assinatura_cordenacao: boolean;
   incluir_campo_assinatura_aluno: boolean;
+  incluir_assinatura_aluno?: boolean;
   status: "rascunho" | "emitido" | "arquivado";
   criado_em: string;
   atualizado_em: string;
+}
+
+// Normalizador de ID de Pasta para garantir compatibilidade total entre string "f_123", número 123 e BigInt
+export function normalizeFolderId(id: any): string {
+  if (id === null || id === undefined) return "";
+  const str = String(id).trim();
+  return str.replace(/^f_/, "");
+}
+
+export function isSameFolder(a: any, b: any): boolean {
+  const normA = normalizeFolderId(a);
+  const normB = normalizeFolderId(b);
+  if (!normA && !normB) return true;
+  if (!normA || !normB) return false;
+  return normA === normB;
+}
+
+export function isDocumentOutsideFolder(pastaId: any): boolean {
+  if (pastaId === null || pastaId === undefined) return true;
+  const str = String(pastaId).trim();
+  return str === "" || str === "null" || str === "undefined";
+}
+
+export interface FormattedA4Page {
+  pageNumber: number;
+  totalPages: number;
+  isFirstPage: boolean;
+  isLastPage: boolean;
+  textSegments: string[];
+  hasSignaturesOnThisPage: boolean;
+}
+
+// Algoritmo preciso de paginação A4 baseado em altura física (794px x 1123px)
+export function paginateDocumentContent({
+  titulo,
+  titleSize,
+  conteudo,
+  contentSize,
+  hasSignatures,
+}: {
+  titulo: string;
+  titleSize: number;
+  conteudo: string;
+  contentSize: number;
+  hasSignatures: boolean;
+}): FormattedA4Page[] {
+  // Orçamento vertical em pixels (A4 = 1123px a 96 DPI):
+  // 1123 - padding vertical (88px) - cabeçalho oficial (84px) - rodapé oficial (48px) = ~903px
+  const A4_USABLE_HEIGHT = 890;
+  const titleCharsPerLine = Math.max(15, Math.floor(670 / (titleSize * 0.58)));
+  const titleLinesEst = Math.max(1, Math.ceil(((titulo || "").trim().length || 1) / titleCharsPerLine));
+  const titleHeightEst = (titleLinesEst * titleSize * 1.3) + 32;
+  const page1MaxHeight = Math.max(220, A4_USABLE_HEIGHT - titleHeightEst);
+  const subsequentMaxHeight = A4_USABLE_HEIGHT;
+  const SIGN_BOX_HEIGHT = 145;
+
+  const lineHeight = contentSize * 1.8;
+  const charsPerLine = Math.max(25, Math.floor(670 / (contentSize * 0.52)));
+
+  const textToProcess = (conteudo || "").trim() || "Nenhum conteúdo inserido ainda. O texto digitado aparecerá exatamente nesta folha oficial...";
+  const rawParagraphs = textToProcess.split("\n");
+
+  // Quebrar parágrafos em blocos para permitir fatiamento suave entre folhas
+  const units: string[] = [];
+  for (const para of rawParagraphs) {
+    if (!para.trim()) {
+      units.push(""); // linha em branco
+      continue;
+    }
+    const pLines = Math.max(1, Math.ceil(para.length / charsPerLine));
+    if (pLines <= 3) {
+      units.push(para);
+    } else {
+      const words = para.split(" ");
+      let cur = "";
+      for (const w of words) {
+        const test = cur ? `${cur} ${w}` : w;
+        if (test.length > charsPerLine * 2.5) {
+          units.push(cur);
+          cur = w;
+        } else {
+          cur = test;
+        }
+      }
+      if (cur) units.push(cur);
+    }
+  }
+
+  const pages: { segments: string[] }[] = [{ segments: [] }];
+  let currentPageIndex = 0;
+  let currentUsedHeight = 0;
+  const getMaxHeight = (idx: number) => (idx === 0 ? page1MaxHeight : subsequentMaxHeight);
+
+  for (let i = 0; i < units.length; i++) {
+    const unit = units[i];
+    let unitHeight: number;
+    if (!unit) {
+      unitHeight = 18;
+    } else {
+      const uLines = Math.max(1, Math.ceil(unit.length / charsPerLine));
+      unitHeight = (uLines * lineHeight) + 12;
+    }
+
+    const maxH = getMaxHeight(currentPageIndex);
+
+    if (currentUsedHeight + unitHeight > maxH && pages[currentPageIndex].segments.length > 0) {
+      currentPageIndex++;
+      pages.push({ segments: [unit] });
+      currentUsedHeight = unitHeight;
+    } else {
+      pages[currentPageIndex].segments.push(unit);
+      currentUsedHeight += unitHeight;
+    }
+  }
+
+  // Verifica se a caixa de assinaturas cabe na folha atual
+  let signPageIdx = currentPageIndex;
+  if (hasSignatures) {
+    const maxH = getMaxHeight(currentPageIndex);
+    if (currentUsedHeight + SIGN_BOX_HEIGHT > maxH) {
+      currentPageIndex++;
+      pages.push({ segments: [] });
+      signPageIdx = currentPageIndex;
+    }
+  }
+
+  const total = pages.length;
+  return pages.map((p, idx) => ({
+    pageNumber: idx + 1,
+    totalPages: total,
+    isFirstPage: idx === 0,
+    isLastPage: idx === total - 1,
+    textSegments: p.segments,
+    hasSignaturesOnThisPage: hasSignatures && (idx === signPageIdx),
+  }));
 }
 
 export function parseFontSize(val: any, defaultVal: number): number {
@@ -193,9 +330,7 @@ export function SulfiteDocumentSheet({
   dataCriacao?: string;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const sheetRef = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState<number>(1);
-  const [sheetHeight, setSheetHeight] = useState<number>(1123);
 
   const titleSize = parseFontSize(tamanhoTitulo, 18);
   const contentSize = parseFontSize(tamanhoConteudo, 16);
@@ -205,6 +340,12 @@ export function SulfiteDocumentSheet({
     : new Date().toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" });
   const horaAtual = new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
 
+  const hasAnySignature = Boolean(
+    incluirAssinaturaProgramaCerto ||
+    incluirAssinaturaCordenacao ||
+    incluirCampoAssinaturaAluno
+  );
+
   const getAlignClass = (align?: string) => {
     if (align === "left") return "text-left";
     if (align === "center") return "text-center";
@@ -212,180 +353,228 @@ export function SulfiteDocumentSheet({
     return "text-justify";
   };
 
+  const pages = useMemo(() => {
+    return paginateDocumentContent({
+      titulo,
+      titleSize,
+      conteudo,
+      contentSize,
+      hasSignatures: hasAnySignature,
+    });
+  }, [titulo, titleSize, conteudo, contentSize, hasAnySignature]);
+
   useEffect(() => {
-    const updateSize = () => {
-      if (sheetRef.current) {
-        setSheetHeight(Math.max(1123, sheetRef.current.offsetHeight));
-      }
+    const updateScale = () => {
       if (containerRef.current) {
         const availableW = containerRef.current.clientWidth;
-        // Largura base de 794px (A4 padrão a 96 DPI).
-        // Se a tela for menor (ex: celular ou preview dividido), escala suavemente para caber inteira
-        // sem ficar cortada na metade e sem barras de rolagem horizontais forçadas.
-        const targetScale = Math.min(1, Math.max(0.15, (availableW - 16) / 794));
+        const targetScale = Math.min(1, Math.max(0.18, (availableW - 32) / 794));
         setScale(targetScale);
       }
     };
 
-    updateSize();
-
+    updateScale();
     let ro: ResizeObserver | null = null;
     if (typeof ResizeObserver !== "undefined" && containerRef.current) {
-      ro = new ResizeObserver(updateSize);
+      ro = new ResizeObserver(updateScale);
       ro.observe(containerRef.current);
-      if (sheetRef.current) ro.observe(sheetRef.current);
     }
-
-    window.addEventListener("resize", updateSize);
+    window.addEventListener("resize", updateScale);
     return () => {
       if (ro) ro.disconnect();
-      window.removeEventListener("resize", updateSize);
+      window.removeEventListener("resize", updateScale);
     };
-  }, [titulo, conteudo, tamanhoTitulo, tamanhoConteudo, estiloTitulo, estiloConteudo, incluirAssinaturaProgramaCerto, incluirAssinaturaCordenacao, incluirCampoAssinaturaAluno]);
+  }, []);
 
   return (
     <div
       ref={containerRef}
-      className="w-full py-4 px-1 sm:px-4 bg-zinc-200/80 rounded-2xl flex justify-center items-start shadow-inner overflow-hidden select-text"
+      className="w-full py-6 px-1 sm:px-4 bg-zinc-200/90 rounded-2xl flex flex-col items-center shadow-inner overflow-hidden select-text space-y-6"
     >
-      {/* Wrapper proporcional com as dimensões escaladas exatas para que a página ocupe o espaço correto */}
-      <div
-        style={{
-          width: `${Math.round(794 * scale)}px`,
-          height: `${Math.round(sheetHeight * scale)}px`,
-          position: "relative",
-        }}
-        className="shrink-0 transition-all duration-150"
-      >
-        {/* Folha do documento (794px fixos com scale pura para manter proporções idênticas ao PDF em qualquer tela) */}
-        <div
-          ref={sheetRef}
-          className="bg-white text-zinc-900 shadow-2xl rounded-xs border border-zinc-300 p-8 sm:p-14 flex flex-col justify-between"
-          style={{
-            width: "794px",
-            minHeight: "1123px",
-            transform: `scale(${scale})`,
-            transformOrigin: "top left",
-            position: "absolute",
-            top: 0,
-            left: 0,
-          }}
-        >
-          {/* PARTE SUPERIOR DA FOLHA */}
-          <div className="flex-1 flex flex-col">
-            {/* 1. CABEÇALHO OFICIAL COM LOGO PROGRAMA CERTO */}
-            <div className="flex items-center gap-3.5 border-b border-zinc-200 pb-4 mb-8">
-              <img
-                src={LOGO_PROGRAMA_CERTO_BASE64}
-                alt="Logo Gestão Cursos Programa Certo"
-                className="w-12 h-12 rounded-xl object-contain shadow-2xs border border-zinc-200/80 shrink-0"
-              />
-              <div className="flex flex-col justify-center">
-                <h1 className="text-xl font-black text-zinc-900 leading-none">
-                  Programa <span className="text-[#0b439c]">Certo</span>
-                </h1>
-                <span className="text-[10px] font-extrabold uppercase tracking-wider text-zinc-400 mt-1">
-                  Plataforma Educacional
-                </span>
-              </div>
-            </div>
+      {/* Barra de Status da Folha A4 */}
+      <div className="w-full max-w-[794px] flex items-center justify-between px-3 text-xs font-bold text-zinc-600 bg-white/80 py-2 rounded-xl border border-zinc-300 shadow-2xs">
+        <span className="flex items-center gap-1.5 text-[#0b439c] font-black uppercase tracking-wider text-[11px]">
+          <FileText className="w-3.5 h-3.5" />
+          Folha Sulfite A4 (Fatiada para Impressão)
+        </span>
+        <span className="bg-zinc-800 text-white px-2.5 py-0.5 rounded-full text-[10px] font-black">
+          {pages.length} {pages.length === 1 ? "Página" : "Páginas"}
+        </span>
+      </div>
 
-            {/* 2. TÍTULO DO DOCUMENTO */}
-            <h2
-              style={{
-                fontSize: `${titleSize}px`,
-                lineHeight: 1.3,
-              }}
-              className={`uppercase tracking-wide text-zinc-900 mb-8 ${
-                estiloTitulo === "normal" ? "font-semibold" : "font-black"
-              } ${getAlignClass(alinhamentoTitulo)}`}
-            >
-              {titulo.trim() || "(TÍTULO DO DOCUMENTO)"}
-            </h2>
+      {/* Pilha de Folhas A4 Reais (Fatiadas exatamente como na impressão) */}
+      <div className="w-full flex flex-col items-center space-y-8">
+        {pages.map((page, pIdx) => {
+          const scaledW = Math.round(794 * scale);
+          const scaledH = Math.round(1123 * scale);
 
-            {/* 3. CONTEÚDO DO DOCUMENTO FORMATADO */}
-            <div
-              style={{
-                fontSize: `${contentSize}px`,
-                lineHeight: 1.8,
-              }}
-              className={`text-zinc-800 whitespace-pre-wrap ${getAlignClass(alinhamentoConteudo)}`}
-            >
-              <RenderFormattedContent
-                content={
-                  conteudo.trim() ||
-                  "Nenhum conteúdo inserido ainda. O texto digitado aparecerá exatamente nesta folha oficial..."
-                }
-                estiloConteudo={estiloConteudo}
-              />
-            </div>
-          </div>
-
-          {/* PARTE INFERIOR DA FOLHA (SEMPRE NO FINAL DA FOLHA) */}
-          <div className="mt-auto pt-6">
-            {/* 4. HOMOLOGAÇÃO E ASSINATURAS INSTITUCIONAIS: SEMPRE UMA DO LADO DA OUTRA COMO NO PDF */}
-            {(incluirAssinaturaProgramaCerto || incluirAssinaturaCordenacao || incluirCampoAssinaturaAluno) && (
-              <div className="border border-zinc-300 rounded-xl p-5 bg-white mb-8">
-                <div className="text-[9px] font-black uppercase tracking-wider text-zinc-400 mb-6">
-                  HOMOLOGAÇÃO E ASSINATURAS INSTITUCIONAIS
+          return (
+            <React.Fragment key={page.pageNumber}>
+              {/* Linha de corte de impressão se houver mais de uma página */}
+              {pIdx > 0 && (
+                <div className="w-full max-w-[794px] flex items-center justify-center gap-3 py-1 select-none">
+                  <div className="h-px bg-zinc-400 flex-1 border-t border-dashed border-zinc-400" />
+                  <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500 bg-zinc-100 px-3 py-1 rounded-full border border-zinc-300 shadow-2xs">
+                    Corte de Impressão • Início da Página {page.pageNumber}
+                  </span>
+                  <div className="h-px bg-zinc-400 flex-1 border-t border-dashed border-zinc-400" />
                 </div>
+              )}
 
-                <div className="flex items-end justify-between gap-6 w-full">
-                  {/* Assinatura Programa Certo */}
-                  {incluirAssinaturaProgramaCerto && (
-                    <div className="flex-1 min-w-0 text-center flex flex-col items-center">
-                      <div className="flex items-center justify-center gap-1.5 mb-2">
+              {/* Wrapper dimensionado na proporção escalada */}
+              <div
+                style={{
+                  width: `${scaledW}px`,
+                  height: `${scaledH}px`,
+                  position: "relative",
+                }}
+                className="shrink-0 transition-all duration-150 shadow-2xl rounded-xs border border-zinc-300 bg-white"
+              >
+                {/* Folha A4 individual pura (794px x 1123px) */}
+                <div
+                  className="bg-white text-zinc-900 p-8 sm:p-12 flex flex-col justify-between"
+                  style={{
+                    width: "794px",
+                    height: "1123px",
+                    maxHeight: "1123px",
+                    overflow: "hidden",
+                    transform: `scale(${scale})`,
+                    transformOrigin: "top left",
+                    position: "absolute",
+                    top: 0,
+                    left: 0,
+                  }}
+                >
+                  {/* PARTE SUPERIOR DA FOLHA */}
+                  <div className="flex-1 flex flex-col min-h-0">
+                    {/* 1. CABEÇALHO OFICIAL COM LOGO PROGRAMA CERTO */}
+                    <div className="flex items-center justify-between border-b border-zinc-200 pb-3 mb-6 shrink-0">
+                      <div className="flex items-center gap-3">
                         <img
                           src={LOGO_PROGRAMA_CERTO_BASE64}
                           alt="Logo Gestão Cursos Programa Certo"
-                          className="w-5 h-5 rounded object-contain shrink-0"
+                          className="w-10 h-10 rounded-xl object-contain shadow-2xs border border-zinc-200/80 shrink-0"
                         />
-                        <span className="text-xs font-black text-zinc-900 truncate">
-                          Programa <span className="text-[#0b439c]">Certo</span>
-                        </span>
+                        <div className="flex flex-col justify-center">
+                          <h1 className="text-lg font-black text-zinc-900 leading-none">
+                            Programa <span className="text-[#0b439c]">Certo</span>
+                          </h1>
+                          <span className="text-[9px] font-extrabold uppercase tracking-wider text-zinc-400 mt-0.5">
+                            Plataforma Educacional
+                          </span>
+                        </div>
                       </div>
-                      <div className="w-full border-t border-zinc-800 mb-1.5" />
-                      <div className="text-xs font-extrabold text-zinc-900 truncate w-full">Gestor Responsável</div>
-                      <div className="text-[10px] text-zinc-500 truncate w-full">Administração Programa Certo</div>
-                    </div>
-                  )}
 
-                  {/* Assinatura Coordenação */}
-                  {incluirAssinaturaCordenacao && (
-                    <div className="flex-1 min-w-0 text-center flex flex-col items-center">
-                      <div className="h-7" />
-                      <div className="w-full border-t border-zinc-800 mb-1.5" />
-                      <div className="text-xs font-extrabold text-zinc-900 truncate w-full">Data: ____ / ____ / ________</div>
-                      <div className="text-[10px] text-zinc-500 truncate w-full">Visto da Coordenação</div>
+                      {/* Badge da Folha */}
+                      <div className="px-3 py-1 bg-blue-50 border border-blue-200/80 rounded-lg text-[10px] font-black text-[#0b439c] uppercase tracking-wider">
+                        {page.isFirstPage ? "DOCUMENTO OFICIAL" : `CONTINUAÇÃO • PÁG. ${page.pageNumber}`}
+                      </div>
                     </div>
-                  )}
 
-                  {/* Assinatura Aluno */}
-                  {incluirCampoAssinaturaAluno && (
-                    <div className="flex-1 min-w-0 text-center flex flex-col items-center">
-                      <div className="h-7" />
-                      <div className="w-full border-t border-zinc-800 mb-1.5" />
-                      <div className="text-xs font-extrabold text-zinc-900 truncate w-full">Assinatura do Aluno</div>
-                      <div className="text-[10px] text-zinc-500 truncate w-full">Estudante / Responsável Legal</div>
+                    {/* 2. TÍTULO DO DOCUMENTO (APENAS NA PÁGINA 1) */}
+                    {page.isFirstPage && (
+                      <h2
+                        style={{
+                          fontSize: `${titleSize}px`,
+                          lineHeight: 1.3,
+                        }}
+                        className={`uppercase tracking-wide text-zinc-900 mb-6 shrink-0 ${
+                          estiloTitulo === "normal" ? "font-semibold" : "font-black"
+                        } ${getAlignClass(alinhamentoTitulo)}`}
+                      >
+                        {titulo.trim() || "(TÍTULO DO DOCUMENTO)"}
+                      </h2>
+                    )}
+
+                    {/* 3. CONTEÚDO CORRESPONDENTE A ESTA FOLHA */}
+                    <div
+                      style={{
+                        fontSize: `${contentSize}px`,
+                        lineHeight: 1.8,
+                      }}
+                      className={`text-zinc-800 whitespace-pre-wrap flex-1 overflow-hidden ${getAlignClass(alinhamentoConteudo)}`}
+                    >
+                      {page.textSegments.map((segment, sIdx) => (
+                        <p key={sIdx} className={segment ? "mb-3" : "h-4"}>
+                          <RenderFormattedContent content={segment} estiloConteudo={estiloConteudo} />
+                        </p>
+                      ))}
                     </div>
-                  )}
+                  </div>
+
+                  {/* PARTE INFERIOR DA FOLHA */}
+                  <div className="mt-auto pt-4 shrink-0">
+                    {/* 4. HOMOLOGAÇÃO E ASSINATURAS (SOMENTE SE HOUVER ALGUMA MARCADA E NA FOLHA DESIGNADA) */}
+                    {page.hasSignaturesOnThisPage && hasAnySignature && (
+                      <div className="border border-zinc-300 rounded-xl p-4 bg-white mb-5 shadow-2xs">
+                        <div className="text-[9px] font-black uppercase tracking-wider text-zinc-400 mb-5">
+                          HOMOLOGAÇÃO E ASSINATURAS INSTITUCIONAIS
+                        </div>
+
+                        <div className="flex items-end justify-between gap-6 w-full">
+                          {/* Assinatura Programa Certo */}
+                          {incluirAssinaturaProgramaCerto && (
+                            <div className="flex-1 min-w-0 text-center flex flex-col items-center">
+                              <div className="flex items-center justify-center gap-1.5 mb-2">
+                                <img
+                                  src={LOGO_PROGRAMA_CERTO_BASE64}
+                                  alt="Logo Gestão Cursos Programa Certo"
+                                  className="w-5 h-5 rounded object-contain shrink-0"
+                                />
+                                <span className="text-xs font-black text-zinc-900 truncate">
+                                  Programa <span className="text-[#0b439c]">Certo</span>
+                                </span>
+                              </div>
+                              <div className="w-full border-t border-zinc-800 mb-1.5" />
+                              <div className="text-xs font-extrabold text-zinc-900 truncate w-full">Gestor Responsável</div>
+                              <div className="text-[10px] text-zinc-500 truncate w-full">Administração Programa Certo</div>
+                            </div>
+                          )}
+
+                          {/* Assinatura Coordenação */}
+                          {incluirAssinaturaCordenacao && (
+                            <div className="flex-1 min-w-0 text-center flex flex-col items-center">
+                              <div className="h-7" />
+                              <div className="w-full border-t border-zinc-800 mb-1.5" />
+                              <div className="text-xs font-extrabold text-zinc-900 truncate w-full">Data: ____ / ____ / ________</div>
+                              <div className="text-[10px] text-zinc-500 truncate w-full">Visto da Coordenação</div>
+                            </div>
+                          )}
+
+                          {/* Assinatura Aluno */}
+                          {incluirCampoAssinaturaAluno && (
+                            <div className="flex-1 min-w-0 text-center flex flex-col items-center">
+                              <div className="h-7" />
+                              <div className="w-full border-t border-zinc-800 mb-1.5" />
+                              <div className="text-xs font-extrabold text-zinc-900 truncate w-full">Assinatura do Aluno</div>
+                              <div className="text-[10px] text-zinc-500 truncate w-full">Estudante / Responsável Legal</div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 5. RODAPÉ OFICIAL DA FOLHA COM NUMERAÇÃO DE PÁGINA */}
+                    <div className="border-t border-zinc-200 pt-2.5 flex items-center justify-between text-[10px] text-zinc-400 font-medium">
+                      <div>
+                        <strong className="text-zinc-600 font-bold">Programa Certo</strong> — Plataforma Educacional
+                      </div>
+                      <div className="font-bold text-zinc-600">
+                        {pages.length > 1 ? `Página ${page.pageNumber} de ${pages.length}` : "Documento Oficial"}
+                      </div>
+                      <div>
+                        Emitido em: {dataAtual} às {horaAtual}
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
-            )}
-
-            {/* 5. RODAPÉ OFICIAL DA FOLHA */}
-            <div className="border-t border-zinc-200 pt-3 flex items-center justify-between text-[10px] text-zinc-400 font-medium">
-              <div>
-                <strong className="text-zinc-600 font-bold">Programa Certo</strong> — Plataforma Educacional
-              </div>
-              <div>
-                Emitido em: {dataAtual} às {horaAtual}
-              </div>
-            </div>
-          </div>
-        </div>
+            </React.Fragment>
+          );
+        })}
       </div>
     </div>
+  );
+}
   );
 }
 

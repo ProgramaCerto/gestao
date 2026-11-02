@@ -154,6 +154,13 @@ export function buildDocumentPdfDoc(docItem: DocumentItem): any {
   doc.setFont("helvetica", defaultFontStyle);
   doc.setTextColor(39, 39, 42);
 
+  const hasAnySignature = Boolean(
+    docItem.incluir_assinatura_programa_certo ||
+    docItem.incluir_assinatura_cordenacao ||
+    docItem.incluir_campo_assinatura_aluno ||
+    (docItem as any).incluir_assinatura_aluno
+  );
+
   const paragraphs = textContent.split("\n");
   for (const para of paragraphs) {
     if (!para.trim()) {
@@ -163,7 +170,8 @@ export function buildDocumentPdfDoc(docItem: DocumentItem): any {
 
     const lines: string[] = doc.splitTextToSize(para, contentWidth);
     for (const line of lines) {
-      if (y + contentLineHeight > maxContentY - 45) {
+      const pageLimit = hasAnySignature ? maxContentY - 45 : maxContentY - 8;
+      if (y + contentLineHeight > pageLimit) {
         y = addNewDocPage();
         doc.setFontSize(contentFontSize);
         doc.setFont("helvetica", defaultFontStyle);
@@ -177,122 +185,124 @@ export function buildDocumentPdfDoc(docItem: DocumentItem): any {
 
   y += 5;
 
-  // 4. Caixa de Homologação e Assinaturas (Mesmo esquema do atendimento - sempre ancorada no final da folha, acima do rodapé)
-  const signBoxHeight = 35;
-  const bottomAnchoredSignY = footerY - signBoxHeight - 6; // Posicionada no final da folha, acima do rodapé oficial
+  // 4. Caixa de Homologação e Assinaturas (Apenas se o documento tiver alguma assinatura selecionada)
+  if (hasAnySignature) {
+    const signBoxHeight = 35;
+    const bottomAnchoredSignY = footerY - signBoxHeight - 6; // Posicionada no final da folha, acima do rodapé oficial
 
-  // Se o conteúdo ultrapassou o espaço antes da caixa ancorada no final, cria nova página para as assinaturas
-  if (y > bottomAnchoredSignY) {
-    y = addNewDocPage();
-  }
-  // Posiciona a caixa de assinaturas sempre no final da página (acima do rodapé oficial)
-  y = Math.max(y, bottomAnchoredSignY);
+    // Se o conteúdo ultrapassou o espaço antes da caixa ancorada no final, cria nova página para as assinaturas
+    if (y > bottomAnchoredSignY) {
+      y = addNewDocPage();
+    }
+    // Posiciona a caixa de assinaturas sempre no final da página (acima do rodapé oficial)
+    y = Math.max(y, bottomAnchoredSignY);
 
-  doc.setFillColor(255, 255, 255);
-  doc.setDrawColor(203, 213, 225);
-  doc.setLineWidth(0.4);
-  doc.roundedRect(margin, y, contentWidth, signBoxHeight, 3, 3, "FD");
+    doc.setFillColor(255, 255, 255);
+    doc.setDrawColor(203, 213, 225);
+    doc.setLineWidth(0.4);
+    doc.roundedRect(margin, y, contentWidth, signBoxHeight, 3, 3, "FD");
 
-  doc.setFontSize(7.5);
-  doc.setFont("helvetica", "bold");
-  doc.setTextColor(100, 116, 139);
-  doc.text("HOMOLOGAÇÃO E ASSINATURAS INSTITUCIONAIS", margin + 6, y + 6);
+    doc.setFontSize(7.5);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(100, 116, 139);
+    doc.text("HOMOLOGAÇÃO E ASSINATURAS INSTITUCIONAIS", margin + 6, y + 6);
 
-  const activeSigsCount = [
-    docItem.incluir_assinatura_programa_certo,
-    docItem.incluir_assinatura_cordenacao,
-    docItem.incluir_campo_assinatura_aluno
-  ].filter(Boolean).length || 1;
+    const activeSigsCount = [
+      docItem.incluir_assinatura_programa_certo,
+      docItem.incluir_assinatura_cordenacao,
+      docItem.incluir_campo_assinatura_aluno || (docItem as any).incluir_assinatura_aluno
+    ].filter(Boolean).length || 1;
 
-  const colWidth = contentWidth / activeSigsCount;
-  let curColX = margin;
-  const lineY = y + 25.5;
+    const colWidth = contentWidth / activeSigsCount;
+    let curColX = margin;
+    const lineY = y + 25.5;
 
-  // Assinatura 1: Programa Certo
-  if (docItem.incluir_assinatura_programa_certo) {
-    const centerX = curColX + colWidth / 2;
-    const stampIconSize = 8;
-    const stampIconX = centerX - stampIconSize / 2;
-    const stampIconY = y + 9.5;
+    // Assinatura 1: Programa Certo
+    if (docItem.incluir_assinatura_programa_certo) {
+      const centerX = curColX + colWidth / 2;
+      const stampIconSize = 8;
+      const stampIconX = centerX - stampIconSize / 2;
+      const stampIconY = y + 9.5;
 
-    try {
-      doc.addImage(LOGO_PROGRAMA_CERTO_BASE64, "PNG", stampIconX, stampIconY, stampIconSize, stampIconSize);
-    } catch {
-      doc.setFillColor(11, 67, 156);
-      doc.roundedRect(stampIconX, stampIconY, stampIconSize, stampIconSize, 1.5, 1.5, "F");
+      try {
+        doc.addImage(LOGO_PROGRAMA_CERTO_BASE64, "PNG", stampIconX, stampIconY, stampIconSize, stampIconSize);
+      } catch {
+        doc.setFillColor(11, 67, 156);
+        doc.roundedRect(stampIconX, stampIconY, stampIconSize, stampIconSize, 1.5, 1.5, "F");
+      }
+
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(8.2);
+      const stampProgText = "Programa ";
+      const stampCertoText = "Certo";
+      const stampProgW = doc.getTextWidth(stampProgText);
+      const stampCertoW = doc.getTextWidth(stampCertoText);
+      const totalW = stampProgW + stampCertoW;
+      const startX = centerX - totalW / 2;
+
+      doc.setTextColor(0, 0, 0);
+      doc.text(stampProgText, startX, lineY - 1.8);
+      doc.setTextColor(130, 183, 255);
+      doc.text(stampCertoText, startX + stampProgW, lineY - 1.8);
+
+      doc.setDrawColor(24, 24, 27);
+      doc.setLineWidth(0.45);
+      doc.line(centerX - 24, lineY, centerX + 24, lineY);
+
+      doc.setFontSize(7.5);
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(24, 24, 27);
+      doc.text("Gestor Responsável", centerX, lineY + 4, { align: "center" });
+
+      doc.setFontSize(6.5);
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(100, 116, 139);
+      doc.text("Administração Programa Certo", centerX, lineY + 7.2, { align: "center" });
+
+      curColX += colWidth;
     }
 
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(8.2);
-    const stampProgText = "Programa ";
-    const stampCertoText = "Certo";
-    const stampProgW = doc.getTextWidth(stampProgText);
-    const stampCertoW = doc.getTextWidth(stampCertoText);
-    const totalW = stampProgW + stampCertoW;
-    const startX = centerX - totalW / 2;
+    // Assinatura 2: Coordenação
+    if (docItem.incluir_assinatura_cordenacao) {
+      const centerX = curColX + colWidth / 2;
 
-    doc.setTextColor(0, 0, 0);
-    doc.text(stampProgText, startX, lineY - 1.8);
-    doc.setTextColor(130, 183, 255);
-    doc.text(stampCertoText, startX + stampProgW, lineY - 1.8);
+      doc.setDrawColor(24, 24, 27);
+      doc.setLineWidth(0.45);
+      doc.line(centerX - 24, lineY, centerX + 24, lineY);
 
-    doc.setDrawColor(24, 24, 27);
-    doc.setLineWidth(0.45);
-    doc.line(centerX - 24, lineY, centerX + 24, lineY);
+      doc.setFontSize(7.5);
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(24, 24, 27);
+      doc.text("Data: ____ / ____ / ________", centerX, lineY + 4, { align: "center" });
 
-    doc.setFontSize(7.5);
-    doc.setFont("helvetica", "bold");
-    doc.setTextColor(24, 24, 27);
-    doc.text("Gestor Responsável", centerX, lineY + 4, { align: "center" });
+      doc.setFontSize(6.5);
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(100, 116, 139);
+      doc.text("Visto da Coordenação", centerX, lineY + 7.2, { align: "center" });
 
-    doc.setFontSize(6.5);
-    doc.setFont("helvetica", "normal");
-    doc.setTextColor(100, 116, 139);
-    doc.text("Administração Programa Certo", centerX, lineY + 7.2, { align: "center" });
+      curColX += colWidth;
+    }
 
-    curColX += colWidth;
-  }
+    // Assinatura 3: Aluno
+    if (docItem.incluir_campo_assinatura_aluno || (docItem as any).incluir_assinatura_aluno) {
+      const centerX = curColX + colWidth / 2;
 
-  // Assinatura 2: Coordenação
-  if (docItem.incluir_assinatura_cordenacao) {
-    const centerX = curColX + colWidth / 2;
+      doc.setDrawColor(24, 24, 27);
+      doc.setLineWidth(0.45);
+      doc.line(centerX - 24, lineY, centerX + 24, lineY);
 
-    doc.setDrawColor(24, 24, 27);
-    doc.setLineWidth(0.45);
-    doc.line(centerX - 24, lineY, centerX + 24, lineY);
+      doc.setFontSize(7.5);
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(24, 24, 27);
+      doc.text("Assinatura do Aluno", centerX, lineY + 4, { align: "center" });
 
-    doc.setFontSize(7.5);
-    doc.setFont("helvetica", "bold");
-    doc.setTextColor(24, 24, 27);
-    doc.text("Data: ____ / ____ / ________", centerX, lineY + 4, { align: "center" });
+      doc.setFontSize(6.5);
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(100, 116, 139);
+      doc.text("Estudante / Responsável Legal", centerX, lineY + 7.2, { align: "center" });
 
-    doc.setFontSize(6.5);
-    doc.setFont("helvetica", "normal");
-    doc.setTextColor(100, 116, 139);
-    doc.text("Visto da Coordenação", centerX, lineY + 7.2, { align: "center" });
-
-    curColX += colWidth;
-  }
-
-  // Assinatura 3: Aluno
-  if (docItem.incluir_campo_assinatura_aluno) {
-    const centerX = curColX + colWidth / 2;
-
-    doc.setDrawColor(24, 24, 27);
-    doc.setLineWidth(0.45);
-    doc.line(centerX - 24, lineY, centerX + 24, lineY);
-
-    doc.setFontSize(7.5);
-    doc.setFont("helvetica", "bold");
-    doc.setTextColor(24, 24, 27);
-    doc.text("Assinatura do Aluno", centerX, lineY + 4, { align: "center" });
-
-    doc.setFontSize(6.5);
-    doc.setFont("helvetica", "normal");
-    doc.setTextColor(100, 116, 139);
-    doc.text("Estudante / Responsável Legal", centerX, lineY + 7.2, { align: "center" });
-
-    curColX += colWidth;
+      curColX += colWidth;
+    }
   }
 
   // 5. Rodapé Oficial no Final de Todas as Páginas
