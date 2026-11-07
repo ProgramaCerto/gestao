@@ -89,7 +89,7 @@ import {
   generateMultipleTicketsPdf
 } from "./lib/generateTicketPdf";
 import { motion, AnimatePresence } from "motion/react";
-import { Course, CourseModule, Lesson, StudentStats, ChatMessage, QuizQuestion, Trilha } from "./types";
+import { Course, CourseModule, Lesson, StudentStats, ChatMessage, QuizQuestion, Trilha, AulaCurso, ParteAula, ParteAulaConcluida } from "./types";
 import { parseMarkdown, slugifyCourse, slugifyLesson, slugify } from "./utils";
 import { supabase, isSupabaseConfigured } from "./lib/supabase";
 import { supabaseAtendimento, isSupabaseAtendimentoConfigured } from "./lib/supabaseAtendimento";
@@ -2252,101 +2252,191 @@ export default function App() {
         if (!dbCursosError && dbCursos && dbCursos.length > 0) {
           for (const dbC of dbCursos) {
             const courseIdStr = String(dbC.id).startsWith("curso-db-") ? String(dbC.id) : `curso-db-${dbC.id}`;
-            let dbModulos: any[] = [];
+            
+            // 1. Tenta carregar da nova estrutura oficial: Aulas (aulas_cursos) e Partes (partes_aulas)
+            let dbAulasCursos: any[] = [];
             try {
-              const { data: mData } = await supabase
-                .from("modulos")
+              const { data: acData } = await supabase
+                .from("aulas_cursos")
                 .select("*")
                 .eq("id_do_curso", dbC.id)
                 .order("ordem", { ascending: true });
-              if (mData) dbModulos = mData;
+              if (acData && acData.length > 0) {
+                dbAulasCursos = acData;
+              }
             } catch {}
 
-            let dbAulas: any[] = [];
+            let dbPartesAulas: any[] = [];
             try {
-              const { data: aData } = await supabase
-                .from("aulas_dos_cursos")
+              const { data: paData } = await supabase
+                .from("partes_aulas")
                 .select("*")
                 .eq("id_do_curso", dbC.id)
-                .order("numero_da_aula", { ascending: true });
-              if (aData) {
-                dbAulas = aData;
-              } else {
-                const fb = await supabase
+                .order("numero_da_parte", { ascending: true });
+              if (paData && paData.length > 0) {
+                dbPartesAulas = paData;
+              }
+            } catch {}
+
+            let courseAulas: AulaCurso[] = [];
+            let parsedModules: { title: string; lessons: Lesson[]; aulaId?: number }[] = [];
+
+            if (dbAulasCursos && dbAulasCursos.length > 0) {
+              // Nova arquitetura oficial: Curso -> Aulas (aulas_cursos) -> Partes (partes_aulas)
+              courseAulas = dbAulasCursos.map((ac: any, aIdx: number) => {
+                // Partes estritamente pertencentes a esta aula específica
+                const aulaPartes: ParteAula[] = (dbPartesAulas || [])
+                  .filter((p: any) => Number(p.id_aula) === Number(ac.id))
+                  .sort((a: any, b: any) => (Number(a.numero_da_parte) || 0) - (Number(b.numero_da_parte) || 0));
+
+                return {
+                  id: Number(ac.id),
+                  id_do_curso: Number(ac.id_do_curso || dbC.id),
+                  titulo_aula: ac.titulo_aula || `Aula ${aIdx + 1}`,
+                  ordem: Number(ac.ordem) || (aIdx + 1),
+                  posicao_apos_aula: ac.posicao_apos_aula !== null && ac.posicao_apos_aula !== undefined ? Number(ac.posicao_apos_aula) : undefined,
+                  partes: aulaPartes
+                };
+              });
+
+              parsedModules = courseAulas.map((aula, aIdx) => {
+                const lessons: Lesson[] = (aula.partes || []).map((p, pIdx) => {
+                  const quizList: QuizQuestion[] = [];
+                  if (p.nome_do_teste) {
+                    const opts = [p.alternativa_a, p.alternativa_b, p.alternativa_c, p.alternativa_d].filter(Boolean) as string[];
+                    const correctLetter = (p.alternativa_certa || "A").trim().toUpperCase();
+                    const correctIdx = correctLetter === "A" ? 0 : correctLetter === "B" ? 1 : correctLetter === "C" ? 2 : 3;
+                    quizList.push({
+                      question: p.nome_do_teste,
+                      options: opts.length > 0 ? opts : ["Opção A", "Opção B", "Opção C", "Opção D"],
+                      correctAnswer: correctIdx >= 0 ? correctIdx : 0,
+                      explanation: "Resposta verificada conforme o gabarito oficial do curso."
+                    });
+                  }
+                  return {
+                    id: p.id,
+                    title: p.nome_da_parte || `Parte ${pIdx + 1}`,
+                    content: p.conteudo || (p.nome_do_teste ? `# ${p.nome_da_parte || "Teste de Fixação"}\n\nResponda ao teste de fixação abaixo:` : "Conteúdo da aula em elaboração."),
+                    duration: "10 min",
+                    quiz: quizList,
+                    parteDb: p
+                  };
+                });
+
+                return {
+                  title: aula.titulo_aula,
+                  lessons: lessons.length > 0 ? lessons : [
+                    {
+                      id: aula.id * 1000 + 1,
+                      title: `Parte 1: ${aula.titulo_aula}`,
+                      content: `# ${aula.titulo_aula}\n\nConteúdo da parte em elaboração.`,
+                      duration: "10 min",
+                      quiz: []
+                    }
+                  ],
+                  aulaId: aula.id
+                };
+              });
+            } else {
+              // Fallback para esquemas legados (modulos / aulas_dos_cursos)
+              let dbModulos: any[] = [];
+              try {
+                const { data: mData } = await supabase
+                  .from("modulos")
+                  .select("*")
+                  .eq("id_do_curso", dbC.id)
+                  .order("ordem", { ascending: true });
+                if (mData) dbModulos = mData;
+              } catch {}
+
+              let dbAulas: any[] = [];
+              try {
+                const { data: aData } = await supabase
                   .from("aulas_dos_cursos")
                   .select("*")
                   .eq("id_do_curso", dbC.id)
-                  .order("id", { ascending: true });
-                if (fb.data) dbAulas = fb.data;
-              }
-            } catch {}
-
-            let parsedModules: { title: string; lessons: Lesson[] }[] = [];
-
-            const mapLesson = (a: any): Lesson => {
-              const quizList: QuizQuestion[] = [];
-              if (a.nome_do_teste) {
-                const opts = [a.alternativa_a, a.alternativa_b, a.alternativa_c, a.alternativa_d].filter(Boolean);
-                const correctIdx = a.alternativa_certa === "A" ? 0 : a.alternativa_certa === "B" ? 1 : a.alternativa_certa === "C" ? 2 : 3;
-                quizList.push({
-                  question: a.nome_do_teste,
-                  options: opts.length > 0 ? opts : ["Opção A", "Opção B", "Opção C", "Opção D"],
-                  correctAnswer: correctIdx >= 0 ? correctIdx : 0,
-                  explanation: "Resposta verificada conforme gabarito do curso."
-                });
-              }
-              return {
-                id: a.id,
-                title: a.nome_da_aula,
-                content: a.conteudo || "Conteúdo em breve.",
-                duration: "15 min",
-                quiz: quizList
-              };
-            };
-
-            if (dbModulos && dbModulos.length > 0) {
-              parsedModules = dbModulos.map((mod: any) => {
-                const moduleLessons = (dbAulas || [])
-                  .filter((a: any) => String(a.id_do_modulo) === String(mod.id) || (!a.id_do_modulo && mod.ordem === 1))
-                  .map(mapLesson);
-
-                return {
-                  title: mod.titulo_do_modulo || mod.nome_do_modulo || "Módulo",
-                  lessons: moduleLessons
-                };
-              });
-            } else if (dbAulas && dbAulas.length > 0) {
-              parsedModules = [
-                {
-                  title: "Módulo Principal",
-                  lessons: dbAulas.map(mapLesson)
+                  .order("numero_da_aula", { ascending: true });
+                if (aData) {
+                  dbAulas = aData;
+                } else {
+                  const fb = await supabase
+                    .from("aulas_dos_cursos")
+                    .select("*")
+                    .eq("id_do_curso", dbC.id)
+                    .order("id", { ascending: true });
+                  if (fb.data) dbAulas = fb.data;
                 }
-              ];
+              } catch {}
+
+              const mapLesson = (a: any): Lesson => {
+                const quizList: QuizQuestion[] = [];
+                if (a.nome_do_teste) {
+                  const opts = [a.alternativa_a, a.alternativa_b, a.alternativa_c, a.alternativa_d].filter(Boolean);
+                  const correctIdx = a.alternativa_certa === "A" ? 0 : a.alternativa_certa === "B" ? 1 : a.alternativa_certa === "C" ? 2 : 3;
+                  quizList.push({
+                    question: a.nome_do_teste,
+                    options: opts.length > 0 ? opts : ["Opção A", "Opção B", "Opção C", "Opção D"],
+                    correctAnswer: correctIdx >= 0 ? correctIdx : 0,
+                    explanation: "Resposta verificada conforme gabarito do curso."
+                  });
+                }
+                return {
+                  id: a.id,
+                  title: a.nome_da_aula,
+                  content: a.conteudo || "Conteúdo em breve.",
+                  duration: "15 min",
+                  quiz: quizList
+                };
+              };
+
+              if (dbModulos && dbModulos.length > 0) {
+                parsedModules = dbModulos.map((mod: any) => {
+                  const moduleLessons = (dbAulas || [])
+                    .filter((a: any) => String(a.id_do_modulo) === String(mod.id) || (!a.id_do_modulo && mod.ordem === 1))
+                    .map(mapLesson);
+
+                  return {
+                    title: mod.titulo_aula || mod.titulo_do_modulo || mod.nome_do_modulo || "Aula",
+                    lessons: moduleLessons
+                  };
+                });
+              } else if (dbAulas && dbAulas.length > 0) {
+                parsedModules = [
+                  {
+                    title: "Aula Principal",
+                    lessons: dbAulas.map(mapLesson)
+                  }
+                ];
+              }
             }
 
             const cName = dbC.nome_do_curso || dbC.title || "Curso";
+            const totalAulasCount = (courseAulas.length > 0 ? courseAulas.length : parsedModules.length) || 1;
             dbCustomCourses.push({
               id: courseIdStr,
               title: cName,
               description: dbC.descricao || dbC.description || "Sem descrição disponível.",
               category: dbC.categoria || dbC.category || "Geral",
-              duration: dbC.duration || `${dbC.aulas || (parsedModules[0]?.lessons.length) || 10} Aulas`,
+              duration: dbC.duration || `${totalAulasCount} ${totalAulasCount === 1 ? "Aula" : "Aulas"}`,
               instructor: dbC.instrutor || dbC.instructor || "Instrutor da Plataforma",
               gradientColor: dbC.gradiente_color || dbC.gradient_color || dbC.gradientColor || "#ADD8E6, #000084",
               visibility: dbC.visibilidade || dbC.visibility || "Público",
-              lessonsCount: dbC.duration || `${(parsedModules[0]?.lessons.length) || 10} Aulas`,
+              lessonsCount: dbC.duration || `${totalAulasCount} ${totalAulasCount === 1 ? "Aula" : "Aulas"}`,
               id_trilha: dbC.id_trilha !== undefined && dbC.id_trilha !== null ? dbC.id_trilha : (dbC.trilha_id || null),
               isCustom: true,
+              aulas: courseAulas,
               modules: parsedModules.length > 0 ? parsedModules : [
                 {
-                  title: "Módulo 1: Conteúdo Principal",
-                  lessons: Array.from({ length: 10 }, (_, i) => ({
-                    title: `Aula ${i + 1}: ${cName}`,
-                    duration: "15 min",
-                    content: `# ${cName} - Aula ${i + 1}\n\nConteúdo completo do curso.`,
-                    videoUrl: "https://www.youtube.com/embed/dQw4w9WgXcQ",
-                    quiz: []
-                  }))
+                  title: `Aula 1: ${cName}`,
+                  lessons: [
+                    {
+                      id: 1,
+                      title: `Parte 1: Introdução a ${cName}`,
+                      duration: "10 min",
+                      content: `# ${cName} - Introdução\n\nConteúdo completo do curso.`,
+                      quiz: []
+                    }
+                  ]
                 }
               ]
             });
@@ -2500,23 +2590,41 @@ export default function App() {
           const studentNameVal = userRow.nome || targetUser.user_metadata?.nome || targetUser.user_metadata?.name || "Estudante";
           setStudentName(studentNameVal);
 
-          // Safe load completed lessons
+          // Safe load completed partes and lessons
           try {
             const userMat = extractMatricula(userRow.matricula || targetUser.id || "");
-            const { data: cAulasByMat } = await supabase
-              .from("aulas_concluidas")
-              .select("*")
-              .eq("matricula_usuario", userMat);
+            const completedLessonsKeys: string[] = [];
 
-            let completedLessonsKeys: string[] = [];
-            if (cAulasByMat && cAulasByMat.length > 0) {
-              completedLessonsKeys = cAulasByMat.map((a: any) => String(a.id_da_aula));
-            }
+            // 1. Tabela oficial de progresso das partes
+            try {
+              const { data: cPartesByMat } = await supabase
+                .from("partes_aulas_concluidas")
+                .select("*")
+                .eq("matricula_usuario", userMat);
+              if (cPartesByMat && cPartesByMat.length > 0) {
+                cPartesByMat.forEach((p: any) => {
+                  if (p.id_da_parte) completedLessonsKeys.push(String(p.id_da_parte));
+                });
+              }
+            } catch {}
+
+            // 2. Tabela legada de aulas_concluidas
+            try {
+              const { data: cAulasByMat } = await supabase
+                .from("aulas_concluidas")
+                .select("*")
+                .eq("matricula_usuario", userMat);
+              if (cAulasByMat && cAulasByMat.length > 0) {
+                cAulasByMat.forEach((a: any) => {
+                  if (a.id_da_aula) completedLessonsKeys.push(String(a.id_da_aula));
+                });
+              }
+            } catch {}
 
             setStats(prev => ({
               ...prev,
               name: studentNameVal,
-              completedLessons: completedLessonsKeys
+              completedLessons: Array.from(new Set([...prev.completedLessons, ...completedLessonsKeys]))
             }));
           } catch {}
         }
@@ -4026,15 +4134,15 @@ export default function App() {
     const newCourseId = `curso-db-${Date.now()}`;
     const defaultModules = [
       {
-        title: "Módulo 1: Conteúdo Principal",
+        title: "Aula 1: Conteúdo Principal",
         lessons: Array.from({ length: Math.min(Math.max(1, numLessons), 50) }, (_, i) => ({
-          title: `Aula ${i + 1}: ${newCourseTitle.trim()}`,
-          duration: "15 min",
-          content: `# ${newCourseTitle.trim()} - Aula ${i + 1}\n\nNesta aula do curso de **${categoryName}**, estudaremos os conceitos de **${newCourseTitle.trim()}** ministrado por **${instructorName}**.\n\n### Tópicos Abordados:\n1. Apresentação e Conceitos Iniciais\n2. Atividades e Práticas\n3. Revisão e Avaliação`,
+          title: `Parte ${i + 1}: ${newCourseTitle.trim()}`,
+          duration: "10 min",
+          content: `# ${newCourseTitle.trim()} - Parte ${i + 1}\n\nNesta parte do curso de **${categoryName}**, estudaremos os conceitos de **${newCourseTitle.trim()}** ministrado por **${instructorName}**.\n\n### Tópicos Abordados:\n1. Apresentação e Conceitos Iniciais\n2. Atividades e Práticas\n3. Revisão e Avaliação`,
           videoUrl: "https://www.youtube.com/embed/dQw4w9WgXcQ",
           quiz: [
             {
-              question: `Qual é o tema principal da Aula ${i + 1}?`,
+              question: `Qual é o tema principal da Parte ${i + 1}?`,
               options: [categoryName, "Teoria Geral", "Outro assunto", "Nenhum"],
               correctAnswer: 0,
               explanation: `Tema focado em ${categoryName}.`
@@ -4248,7 +4356,7 @@ export default function App() {
       setCourseToDelete(null);
       setDeleteCoursePassword("");
       setDeleteCourseErrorMsg("");
-      alert(`O curso "${targetTitle}" e todas as suas aulas e módulos foram excluídos com sucesso!`);
+      alert(`O curso "${targetTitle}" e todas as suas aulas e partes foram excluídos com sucesso!`);
     } catch (err) {
       console.error("Erro ao excluir curso:", err);
       setDeleteCourseErrorMsg("Ocorreu um erro ao excluir o curso. Tente novamente.");
@@ -4330,21 +4438,50 @@ export default function App() {
 
     if (addType === "module") {
       if (!addModuleTitle.trim()) {
-        alert("Por favor, informe o título do novo módulo.");
+        alert("Por favor, informe o título da nova aula.");
         return;
       }
       const newModuleObj: CourseModule = {
         title: addModuleTitle.trim(),
         lessons: [
           {
-            title: `Aula 1: ${addModuleTitle.trim()}`,
-            duration: "Escrito",
-            content: `# ${addModuleTitle.trim()}\n\nBem-vindo a este novo módulo do curso **${moduleLessonCourse.title}**.\n\n### Conteúdo da Aula\nNesta aula de texto, você aprenderá conceitos fundamentais do módulo.`,
+            title: `Parte 1: Introdução a ${addModuleTitle.trim()}`,
+            duration: "10 min",
+            content: `# ${addModuleTitle.trim()}\n\nBem-vindo a esta nova aula do curso **${moduleLessonCourse.title}**.\n\n### Conteúdo da Aula\nNesta lição de estudo, você aprenderá conceitos fundamentais desta aula.`,
             videoUrl: "",
             quiz: []
           }
         ]
       };
+
+      // Inserir na tabela oficial aulas_cursos no Supabase
+      if (supabase) {
+        const numericId = parseInt(moduleLessonCourse.id.replace("curso-db-", ""), 10);
+        if (!isNaN(numericId)) {
+          try {
+            const { data: newAulaRow } = await supabase.from("aulas_cursos").insert({
+              id_do_curso: numericId,
+              titulo_aula: addModuleTitle.trim(),
+              ordem: (moduleLessonCourse.modules || []).length + 1,
+              posicao_apos_aula: 0
+            }).select().maybeSingle();
+
+            if (newAulaRow?.id) {
+              newModuleObj.aulaId = newAulaRow.id;
+              // Cria a primeira parte inicial na tabela partes_aulas
+              await supabase.from("partes_aulas").insert({
+                id_do_curso: numericId,
+                id_aula: newAulaRow.id,
+                numero_da_parte: 1,
+                nome_da_parte: `Parte 1: Introdução a ${addModuleTitle.trim()}`,
+                conteudo: `# ${addModuleTitle.trim()}\n\nConteúdo inicial da aula.`
+              });
+            }
+          } catch (err) {
+            console.error("Erro ao inserir aula_curso no Supabase:", err);
+          }
+        }
+      }
 
       updatedCourse = {
         ...moduleLessonCourse,
@@ -4352,19 +4489,43 @@ export default function App() {
       };
 
       setCourses(prev => prev.map(c => c.id === moduleLessonCourse.id ? updatedCourse : c));
-      alert(`Módulo "${addModuleTitle.trim()}" adicionado com sucesso ao curso!`);
+      alert(`Aula "${addModuleTitle.trim()}" adicionada com sucesso ao curso!`);
     } else {
       if (!addLessonTitle.trim()) {
-        alert("Por favor, informe o título da nova aula.");
+        alert("Por favor, informe o título da nova parte.");
         return;
       }
       const newLessonObj: Lesson = {
         title: addLessonTitle.trim(),
-        duration: "Escrito",
-        content: addLessonContent.trim() || `# ${addLessonTitle.trim()}\n\nConteúdo escrito referente à aula **${addLessonTitle.trim()}**.`,
+        duration: "10 min",
+        content: addLessonContent.trim() || `# ${addLessonTitle.trim()}\n\nConteúdo escrito referente à parte **${addLessonTitle.trim()}**.`,
         videoUrl: "",
         quiz: []
       };
+
+      // Inserir na tabela oficial partes_aulas no Supabase
+      if (supabase) {
+        const numericId = parseInt(moduleLessonCourse.id.replace("curso-db-", ""), 10);
+        if (!isNaN(numericId)) {
+          try {
+            const targetAula = moduleLessonCourse.modules?.[selectedTargetModuleIndex];
+            const targetAulaId = (targetAula as any)?.aulaId || (selectedTargetModuleIndex + 1);
+            const { data: newParteRow } = await supabase.from("partes_aulas").insert({
+              id_do_curso: numericId,
+              id_aula: targetAulaId,
+              numero_da_parte: (targetAula?.lessons?.length || 0) + 1,
+              nome_da_parte: addLessonTitle.trim(),
+              conteudo: addLessonContent.trim() || `# ${addLessonTitle.trim()}\n\nConteúdo escrito referente à parte **${addLessonTitle.trim()}**.`
+            }).select().maybeSingle();
+
+            if (newParteRow?.id) {
+              newLessonObj.id = newParteRow.id;
+            }
+          } catch (err) {
+            console.error("Erro ao inserir parte_aula no Supabase:", err);
+          }
+        }
+      }
 
       const updatedModules = (moduleLessonCourse.modules || []).map((m, idx) => {
         if (idx === selectedTargetModuleIndex) {
@@ -4382,25 +4543,7 @@ export default function App() {
       };
 
       setCourses(prev => prev.map(c => c.id === moduleLessonCourse.id ? updatedCourse : c));
-
-      // Insert into Supabase if connected
-      if (supabase) {
-        const numericId = parseInt(moduleLessonCourse.id.replace("curso-db-", ""), 10);
-        if (!isNaN(numericId)) {
-          try {
-            await supabase.from("aulas_dos_cursos").insert({
-              id_do_curso: numericId,
-              aula: (updatedModules[selectedTargetModuleIndex]?.lessons?.length || 1),
-              nome_da_aula: addLessonTitle.trim(),
-              conteudo: addLessonContent.trim() || `# ${addLessonTitle.trim()}\n\nConteúdo escrito referente à aula **${addLessonTitle.trim()}**.`
-            });
-          } catch (err) {
-            console.error("Erro ao inserir aula no Supabase:", err);
-          }
-        }
-      }
-
-      alert(`Aula "${addLessonTitle.trim()}" adicionada com sucesso ao módulo!`);
+      alert(`Parte "${addLessonTitle.trim()}" adicionada com sucesso à aula!`);
     }
 
     if (selectedCourse?.id === moduleLessonCourse.id) {
@@ -4514,7 +4657,7 @@ export default function App() {
 
 
 
-  // Helper: check if lesson is complete
+  // Helper: check if lesson or parte is complete
   const isLessonCompleted = (courseId: string, modIdx: number, lesIdx: number) => {
     const numericCourseId = parseInt(String(courseId).replace("curso-db-", ""), 10) || 1;
     const currentCourseObj = courses.find(c => c.id === courseId) || selectedCourse;
@@ -4528,6 +4671,9 @@ export default function App() {
     ];
     if (lesObj?.id) {
       keysToCheck.push(String(lesObj.id));
+    }
+    if (lesObj?.parteDb?.id) {
+      keysToCheck.push(String(lesObj.parteDb.id));
     }
 
     return keysToCheck.some(k => stats.completedLessons.includes(k));
@@ -4694,7 +4840,19 @@ export default function App() {
     let allCompleted = true;
     course.modules.forEach((mod, mIdx) => {
       mod.lessons.forEach((_, lIdx) => {
-        if (!updatedLessons.includes(`${course.id}-${mIdx}-${lIdx}`)) {
+        const numericCourseId = parseInt(String(course.id).replace("curso-db-", ""), 10) || 1;
+        const lesObj = mod.lessons?.[lIdx] as any;
+        const calculatedDbId = lesObj?.id ? String(lesObj.id) : String(numericCourseId * 1000 + mIdx * 100 + lIdx + 1);
+        const keysToCheck = [
+          `${course.id}-${mIdx}-${lIdx}`,
+          `${numericCourseId}-${mIdx}-${lIdx}`,
+          calculatedDbId
+        ];
+        if (lesObj?.id) keysToCheck.push(String(lesObj.id));
+        if (lesObj?.parteDb?.id) keysToCheck.push(String(lesObj.parteDb.id));
+
+        const isComp = keysToCheck.some(k => updatedLessons.includes(k));
+        if (!isComp) {
           allCompleted = false;
         }
       });
@@ -4738,7 +4896,7 @@ export default function App() {
     }
   };
 
-  // Mark lesson as complete
+  // Mark lesson / parte as complete
   const markLessonComplete = async (courseId: string, modIdx: number, lesIdx: number) => {
     const numericCourseId = parseInt(String(courseId).replace("curso-db-", ""), 10) || 1;
     const currentCourseObj = courses.find(c => c.id === courseId) || selectedCourse;
@@ -4772,41 +4930,58 @@ export default function App() {
         lastStudyDate: todayStr
       });
 
-      // Sync lesson completion to Supabase
+      if (currentCourseObj) {
+        await checkAndCompleteCourse(currentCourseObj, updatedLessons);
+      }
+
+      // Sync completion to Supabase (partes_aulas_concluidas and aulas_concluidas)
       if (user && supabase) {
         try {
           const userMat = extractMatricula((user as any)?.matricula || user.id || "", allUsers);
-          const numericCourseId = parseInt(String(courseId).replace("curso-db-", ""), 10) || 1;
-          const currentCourseObj = courses.find(c => c.id === courseId) || selectedCourse;
-          const lessonObj = currentCourseObj?.modules?.[modIdx]?.lessons?.[lesIdx] as any;
-          const lessonDbId = lessonObj?.id ? parseInt(String(lessonObj.id), 10) : (numericCourseId * 1000 + modIdx * 100 + lesIdx + 1);
+          const parteId = lessonObj?.id ? parseInt(String(lessonObj.id), 10) : lessonDbId;
 
-          // Standard Supabase payload: matricula_usuario & id_da_aula
-          const cleanPayload = {
-            matricula_usuario: userMat,
-            id_da_aula: lessonDbId
-          };
+          if (userMat && parteId) {
+            // 1. Salvar na tabela oficial partes_aulas_concluidas
+            try {
+              const { data: existingParte } = await supabase
+                .from("partes_aulas_concluidas")
+                .select("id")
+                .eq("matricula_usuario", userMat)
+                .eq("id_da_parte", parteId)
+                .limit(1)
+                .maybeSingle();
 
-          // Check if already present in database to avoid duplicate rows
-          const { data: existingAula } = await supabase
-            .from("aulas_concluidas")
-            .select("id")
-            .eq("matricula_usuario", userMat)
-            .eq("id_da_aula", lessonDbId)
-            .limit(1)
-            .maybeSingle();
-
-          if (!existingAula) {
-            const { error: errorAulas } = await supabase.from("aulas_concluidas").insert(cleanPayload);
-            if (errorAulas) {
-              await supabase.from("aulas_concluidas").insert({
-                id_do_usuario: user.id,
-                id_da_aula: lessonDbId
-              });
+              if (!existingParte) {
+                await supabase.from("partes_aulas_concluidas").insert({
+                  matricula_usuario: userMat,
+                  id_da_parte: parteId,
+                  data_da_conclusao: new Date().toISOString()
+                });
+              }
+            } catch (errParte) {
+              console.warn("Aviso ao salvar em partes_aulas_concluidas:", errParte);
             }
+
+            // 2. Salvar na tabela legada aulas_concluidas para retrocompatibilidade
+            try {
+              const { data: existingAula } = await supabase
+                .from("aulas_concluidas")
+                .select("id")
+                .eq("matricula_usuario", userMat)
+                .eq("id_da_aula", parteId)
+                .limit(1)
+                .maybeSingle();
+
+              if (!existingAula) {
+                await supabase.from("aulas_concluidas").insert({
+                  matricula_usuario: userMat,
+                  id_da_aula: parteId
+                });
+              }
+            } catch {}
           }
         } catch (err) {
-          console.error("Erro ao salvar aula concluída no Supabase:", err);
+          console.error("Erro ao sincronizar conclusão da parte no Supabase:", err);
         }
       }
     }
@@ -6074,7 +6249,7 @@ export default function App() {
                   <div>
                     <h4 className="font-bold text-sm text-white">Gerencie o Programa Certo e os cursos por aqui</h4>
                     <p className="text-xs text-blue-100/75 mt-1 leading-relaxed">
-                      Gerencie o Programa Certo e os cursos do Programa Certo por aqui: catálogo completo, aulas, módulos, testes e trilhas de formação.
+                      Gerencie o Programa Certo e os cursos do Programa Certo por aqui: catálogo completo, aulas, partes, testes e trilhas de formação.
                     </p>
                   </div>
                 </div>
@@ -6857,7 +7032,7 @@ export default function App() {
                 >
                   <BookOpen className="w-5 h-5 text-[#0b439c] group-hover:scale-110 transition-transform" />
                   <h4 className="font-bold text-sm text-zinc-900">Gerenciar Cursos</h4>
-                  <p className="text-xs text-zinc-500">Gerencie o Programa Certo e os cursos do Programa Certo por aqui: catálogo, módulos e aulas.</p>
+                  <p className="text-xs text-zinc-500">Gerencie o Programa Certo e os cursos do Programa Certo por aqui: catálogo, aulas e partes.</p>
                 </button>
 
                 <button
@@ -8952,7 +9127,7 @@ export default function App() {
                           <td className="px-5 py-4 text-zinc-600">
                             <span className="flex items-center gap-1.5 font-semibold">
                               <BookOpen className="w-3.5 h-3.5 text-zinc-400" />
-                              {course.modules?.length || 1} Módulo(s) / Texto
+                              {course.modules?.length || 1} Aula(s) / Texto
                             </span>
                           </td>
                           <td className="px-5 py-4">
@@ -9062,7 +9237,7 @@ export default function App() {
                           </span>
                           <span className="flex items-center gap-1">
                             <BookOpen className="w-3.5 h-3.5 text-zinc-500" />
-                            {course.modules?.length || 1} Módulo(s)
+                            {course.modules?.length || 1} Aula(s)
                           </span>
                         </div>
                       </div>
@@ -9163,7 +9338,7 @@ export default function App() {
                   </span>
                   <span className="text-[11px] font-black uppercase tracking-wider px-3 py-1 rounded-full bg-white/20 text-white backdrop-blur-xs border border-white/20 flex items-center gap-1.5">
                     <Layers className="w-3 h-3" />
-                    {selectedCourse.modules?.length || 0} Módulos • {selectedCourse.modules?.reduce((acc, m) => acc + (m.lessons?.length || 0), 0) || 0} Aulas
+                    {selectedCourse.modules?.length || 0} Aulas • {selectedCourse.modules?.reduce((acc, m) => acc + (m.lessons?.length || 0), 0) || 0} Partes
                   </span>
                   {(courseInfoSourceTab === "cursos_gestao" || accountType === "administrador" || accountType === "instrutor") && (
                     <span className="text-[11px] font-black uppercase tracking-wider px-3 py-1 rounded-full bg-amber-500/30 text-amber-100 border border-amber-400/30">
@@ -9190,7 +9365,7 @@ export default function App() {
                       className="px-5 py-2.5 bg-[#0b439c] hover:bg-blue-800 text-white font-bold text-xs rounded-xl transition-all shadow-md cursor-pointer flex items-center gap-2"
                     >
                       <Plus className="w-4 h-4" />
-                      Adicionar Módulo / Aula
+                      Adicionar Aula / Parte
                     </button>
 
                     <button
@@ -9309,11 +9484,11 @@ export default function App() {
                           </span>
                         </div>
                         <div className="flex justify-between py-1 border-b border-zinc-50">
-                          <span className="text-zinc-500 font-medium">Total de Módulos:</span>
+                          <span className="text-zinc-500 font-medium">Total de Aulas:</span>
                           <span className="font-bold text-[#0b439c]">{selectedCourse.modules?.length || 0}</span>
                         </div>
                         <div className="flex justify-between py-1">
-                          <span className="text-zinc-500 font-medium">Total de Aulas:</span>
+                          <span className="text-zinc-500 font-medium">Total de Partes:</span>
                           <span className="font-bold text-[#0b439c]">
                             {selectedCourse.modules?.reduce((acc, m) => acc + (m.lessons?.length || 0), 0) || 0}
                           </span>
@@ -9351,13 +9526,13 @@ export default function App() {
                   )}
                 </div>
 
-                {/* Right side: Modules & Lessons Management (8 cols on lg) */}
+                {/* Right side: Aulas & Partes Management (8 cols on lg) */}
                 <div className="lg:col-span-8 space-y-4">
                   <div className="bg-white border border-zinc-200 rounded-2xl overflow-hidden shadow-xs">
                     <div className="p-4 bg-zinc-50 border-b border-zinc-200 flex items-center justify-between">
                       <h4 className="font-display font-bold text-sm text-zinc-900 uppercase tracking-wider flex items-center gap-2">
                         <Layers className="w-4 h-4 text-[#0b439c]" />
-                        Estrutura De Módulos E Aulas
+                        Estrutura de Aulas e Partes
                       </h4>
                       {(courseInfoSourceTab === "cursos_gestao" || accountType === "administrador" || accountType === "instrutor") ? (
                         <button
@@ -9372,11 +9547,11 @@ export default function App() {
                           className="px-3 py-1.5 bg-[#0b439c] hover:bg-blue-800 text-white font-bold text-xs rounded-lg transition-all cursor-pointer flex items-center gap-1.5 shadow-xs"
                         >
                           <Plus className="w-3.5 h-3.5" />
-                          Novo Módulo
+                          Nova Aula
                         </button>
                       ) : (
                         <span className="text-xs text-zinc-500 font-semibold">
-                          {selectedCourse.modules?.length || 0} Módulos
+                          {selectedCourse.modules?.length || 0} {selectedCourse.modules?.length === 1 ? "Aula" : "Aulas"}
                         </span>
                       )}
                     </div>
@@ -9405,11 +9580,11 @@ export default function App() {
                                 className="px-2.5 py-1 bg-zinc-100 hover:bg-blue-50 text-zinc-700 hover:text-[#0b439c] font-bold text-[11px] rounded-lg transition-all cursor-pointer flex items-center gap-1 border border-zinc-200"
                               >
                                 <Plus className="w-3 h-3" />
-                                Adicionar Aula
+                                Adicionar Parte
                               </button>
                             ) : (
                               <span className="text-[11px] text-zinc-400 font-medium">
-                                {module.lessons?.length || 0} Aulas
+                                {module.lessons?.length || 0} {module.lessons?.length === 1 ? "Parte" : "Partes"}
                               </span>
                             )}
                           </div>
@@ -9432,7 +9607,7 @@ export default function App() {
                                     )}
                                     <div className="min-w-0 flex-1">
                                       <p className="text-xs font-semibold text-zinc-800 truncate">
-                                        Aula {lIdx + 1}: {lesson.title}
+                                        Parte {lIdx + 1}: {lesson.title}
                                       </p>
                                     </div>
                                   </div>
@@ -9515,8 +9690,12 @@ export default function App() {
                       {selectedCourse.title}
                     </button>
                     <ChevronRight className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
-                    <span className="font-extrabold text-zinc-900 truncate" title={selectedCourse.modules?.[selectedModuleIndex]?.lessons?.[selectedLessonIndex]?.title || "Aula"}>
-                      {selectedCourse.modules?.[selectedModuleIndex]?.lessons?.[selectedLessonIndex]?.title || "Aula"}
+                    <span className="font-semibold text-zinc-600 truncate">
+                      Aula {selectedModuleIndex + 1}: {selectedCourse.modules[selectedModuleIndex]?.title || "Aula"}
+                    </span>
+                    <ChevronRight className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+                    <span className="font-extrabold text-[#0b439c] truncate" title={selectedCourse.modules?.[selectedModuleIndex]?.lessons?.[selectedLessonIndex]?.title || "Parte"}>
+                      Parte {selectedLessonIndex + 1}: {selectedCourse.modules?.[selectedModuleIndex]?.lessons?.[selectedLessonIndex]?.title || "Parte"}
                     </span>
                   </div>
                 </div>
@@ -9532,61 +9711,62 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Layout Split: Left Course Modules Sidebar, Center Markdown Content */}
+              {/* Layout Split: Left Course Aulas Sidebar, Center Markdown Content */}
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
                 
-                {/* Left Column (3 span): Module Navigation Sidebar */}
+                {/* Left Column (3 span): Aula & Partes Navigation Sidebar */}
                 <div className="lg:col-span-3 space-y-4">
-                  {/* Module Selector Dropdown Card */}
+                  {/* Aula Selecionada Dropdown Card */}
                   <div className="relative">
                     <button
                       onClick={() => setIsModuleDropdownOpen(!isModuleDropdownOpen)}
-                      className="w-full bg-white border border-zinc-200 hover:border-blue-300 rounded-xl p-3.5 text-left transition-all shadow-xs flex items-center justify-between gap-2 cursor-pointer group"
+                      className="w-full bg-white border border-zinc-200 hover:border-blue-400 rounded-xl p-3.5 text-left transition-all shadow-xs flex items-center justify-between gap-2 cursor-pointer group"
                     >
                       <div className="min-w-0 flex-1">
-                        <span className="text-[10px] font-black text-zinc-400 uppercase tracking-wider block">
-                          Módulo Selecionado
+                        <span className="text-[10px] font-black text-blue-700 uppercase tracking-wider block">
+                          Aula Selecionada
                         </span>
-                        <p className="text-xs font-bold text-zinc-900 truncate">
-                          Módulo {selectedModuleIndex + 1}: {selectedCourse.modules[selectedModuleIndex]?.title}
+                        <p className="text-xs font-bold text-zinc-900 truncate mt-0.5" title={`Aula ${selectedModuleIndex + 1}: ${selectedCourse.modules[selectedModuleIndex]?.title || "Aula"}`}>
+                          Aula {selectedModuleIndex + 1}: {selectedCourse.modules[selectedModuleIndex]?.title}
                         </p>
                       </div>
-                      <ChevronDown className={`w-4 h-4 text-zinc-400 group-hover:text-zinc-600 transition-transform shrink-0 ${isModuleDropdownOpen ? "rotate-180" : ""}`} />
+                      <ChevronDown className={`w-4 h-4 text-zinc-400 group-hover:text-blue-600 transition-transform shrink-0 ${isModuleDropdownOpen ? "rotate-180" : ""}`} />
                     </button>
 
-                    {/* Dropdown Menu listing all Modules */}
+                    {/* Menu de Aulas - Dropdown listing all Aulas do curso */}
                     <AnimatePresence>
                       {isModuleDropdownOpen && (
                         <motion.div
                           initial={{ opacity: 0, y: 5, scale: 0.98 }}
                           animate={{ opacity: 1, y: 0, scale: 1 }}
                           exit={{ opacity: 0, y: 5, scale: 0.98 }}
-                          className="absolute top-full left-0 right-0 mt-2 bg-white border border-zinc-200 rounded-xl shadow-xl z-30 overflow-hidden divide-y divide-zinc-100 max-h-64 overflow-y-auto"
+                          className="absolute top-full left-0 right-0 mt-2 bg-white border border-zinc-200 rounded-xl shadow-xl z-30 overflow-hidden divide-y divide-zinc-100 max-h-72 overflow-y-auto"
                         >
-                          <div className="p-2.5 bg-zinc-50 text-[10px] font-black uppercase text-zinc-400 tracking-wider">
-                            Selecione o Módulo ({selectedCourse.modules.length})
+                          <div className="p-2.5 bg-zinc-50 text-[10px] font-black uppercase text-zinc-500 tracking-wider flex items-center justify-between">
+                            <span>Menu de Aulas</span>
+                            <span className="text-blue-700 bg-blue-50 px-2 py-0.5 rounded font-bold">{selectedCourse.modules.length} {selectedCourse.modules.length === 1 ? "Aula" : "Aulas"}</span>
                           </div>
-                          {selectedCourse.modules.map((mod, mIdx) => {
-                            const isCurrentMod = selectedModuleIndex === mIdx;
+                          {selectedCourse.modules.map((aula, aIdx) => {
+                            const isCurrentAula = selectedModuleIndex === aIdx;
                             return (
                               <button
-                                key={mIdx}
+                                key={aIdx}
                                 onClick={() => {
-                                  setSelectedModuleIndex(mIdx);
+                                  setSelectedModuleIndex(aIdx);
                                   setSelectedLessonIndex(0);
                                   setIsModuleDropdownOpen(false);
                                 }}
                                 className={`w-full text-left p-3 text-xs transition-all flex items-center justify-between gap-2 cursor-pointer ${
-                                  isCurrentMod
-                                    ? "bg-blue-50 text-[#0b439c] font-bold"
+                                  isCurrentAula
+                                    ? "bg-blue-50 text-[#0b439c] font-bold border-l-4 border-[#0b439c]"
                                     : "text-zinc-700 hover:bg-zinc-50"
                                 }`}
                               >
                                 <div className="min-w-0 flex-1">
-                                  <span className="block text-[10px] text-zinc-400 font-bold uppercase">Módulo {mIdx + 1}</span>
-                                  <p className="truncate font-semibold">{mod.title}</p>
+                                  <span className="block text-[10px] text-zinc-400 font-bold uppercase">Aula {aIdx + 1}</span>
+                                  <p className="truncate font-semibold">{aula.title}</p>
                                 </div>
-                                {isCurrentMod && <CheckCircle2 className="w-4 h-4 text-[#0b439c] shrink-0" />}
+                                {isCurrentAula && <CheckCircle2 className="w-4 h-4 text-[#0b439c] shrink-0" />}
                               </button>
                             );
                           })}
@@ -9595,25 +9775,25 @@ export default function App() {
                     </AnimatePresence>
                   </div>
 
-                  {/* Lessons List for the Selected Module */}
+                  {/* Caixinha: Partes da Aula (mostra estritamente as partes da aula ativa) */}
                   <div className="bg-white border border-zinc-200 rounded-xl overflow-hidden shadow-xs p-2 space-y-1">
                     <div className="px-2.5 py-2 border-b border-zinc-100 flex items-center justify-between">
-                      <span className="text-[10px] font-black text-zinc-400 uppercase tracking-wider">
-                        Aulas ({selectedCourse.modules[selectedModuleIndex]?.lessons?.length || 0})
+                      <span className="text-[10px] font-black text-zinc-500 uppercase tracking-wider">
+                        Partes da Aula
                       </span>
                       <span className="text-[10px] font-bold text-[#0b439c] bg-blue-50 px-2 py-0.5 rounded">
-                        Módulo {selectedModuleIndex + 1}
+                        {selectedCourse.modules[selectedModuleIndex]?.lessons?.length || 0} {selectedCourse.modules[selectedModuleIndex]?.lessons?.length === 1 ? "Parte" : "Partes"}
                       </span>
                     </div>
 
-                    <div className="space-y-1 pt-1 max-h-[420px] overflow-y-auto pr-1">
-                      {selectedCourse.modules[selectedModuleIndex]?.lessons?.map((les, lIdx) => {
-                        const isSelected = selectedLessonIndex === lIdx;
-                        const isCompleted = isLessonCompleted(selectedCourse.id, selectedModuleIndex, lIdx);
+                    <div className="space-y-1 pt-1 max-h-[460px] overflow-y-auto pr-1">
+                      {selectedCourse.modules[selectedModuleIndex]?.lessons?.map((parte, pIdx) => {
+                        const isSelected = selectedLessonIndex === pIdx;
+                        const isCompleted = isLessonCompleted(selectedCourse.id, selectedModuleIndex, pIdx);
                         return (
                           <button
-                            key={lIdx}
-                            onClick={() => handleSelectLesson(selectedCourse, selectedModuleIndex, lIdx)}
+                            key={pIdx}
+                            onClick={() => handleSelectLesson(selectedCourse, selectedModuleIndex, pIdx)}
                             className={`w-full text-left p-2.5 rounded-lg text-xs transition-all flex items-start gap-2.5 cursor-pointer ${
                               isSelected
                                 ? "bg-[#0b439c] text-white font-semibold shadow-xs"
@@ -9628,7 +9808,7 @@ export default function App() {
                               )}
                             </span>
                             <div className="flex-1 min-w-0">
-                              <p className="truncate leading-tight font-medium">Aula {lIdx + 1}: {les.title}</p>
+                              <p className="truncate leading-tight font-medium">Parte {pIdx + 1}: {parte.title}</p>
                             </div>
                           </button>
                         );
@@ -9649,17 +9829,22 @@ export default function App() {
                 <div className="lg:col-span-9 space-y-6">
                   {selectedCourse.modules[selectedModuleIndex]?.lessons[selectedLessonIndex] ? (
                     <div className="bg-white border border-zinc-200 rounded-2xl overflow-hidden shadow-sm">
-                      {/* Lesson Banner */}
+                      {/* Parte Banner */}
                       <div className="p-6 bg-gradient-to-r from-zinc-900 to-zinc-950 text-white flex justify-between items-center">
-                      <div>
-                        <span className="text-[9px] font-black uppercase tracking-wider text-zinc-400 bg-white/10 px-2 py-0.5 rounded">
-                          Aula Ativa
-                        </span>
-                        <h3 className="font-display font-extrabold text-xl mt-1 tracking-tight">
-                          {selectedCourse.modules[selectedModuleIndex].lessons[selectedLessonIndex].title}
-                        </h3>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-[9px] font-black uppercase tracking-wider text-blue-300 bg-blue-950/70 border border-blue-800/50 px-2 py-0.5 rounded">
+                              Aula {selectedModuleIndex + 1}
+                            </span>
+                            <span className="text-[9px] font-black uppercase tracking-wider text-emerald-300 bg-emerald-950/70 border border-emerald-800/50 px-2 py-0.5 rounded">
+                              Parte {selectedLessonIndex + 1} de {selectedCourse.modules[selectedModuleIndex]?.lessons?.length || 1}
+                            </span>
+                          </div>
+                          <h3 className="font-display font-extrabold text-xl mt-2 tracking-tight">
+                            {selectedCourse.modules[selectedModuleIndex].lessons[selectedLessonIndex].title}
+                          </h3>
+                        </div>
                       </div>
-                    </div>
 
                     {/* Rich Rendered Content - Protegido contra cópia de texto didático */}
                     <div 
@@ -9849,7 +10034,7 @@ export default function App() {
                           <div className="flex items-center gap-2">
                             <HelpCircle className="w-5 h-5 text-blue-700" />
                             <h4 className="font-display font-bold text-lg text-zinc-900">
-                              Teste de Fixação da Aula
+                              Teste de Fixação da Parte
                             </h4>
                           </div>
 
@@ -9939,32 +10124,57 @@ export default function App() {
                         </div>
                       )}
 
-                      {/* Bottom Lesson Navigation (Next Lesson Button) */}
+                      {/* Bottom Lesson Navigation (Next Parte / Next Aula Button) */}
                       {(() => {
-                        const currentMod = selectedCourse.modules[selectedModuleIndex];
-                        const totalMods = selectedCourse.modules.length;
-                        const totalLes = currentMod?.lessons?.length || 0;
+                        const currentAula = selectedCourse.modules[selectedModuleIndex];
+                        const totalAulas = selectedCourse.modules.length;
+                        const totalPartes = currentAula?.lessons?.length || 0;
 
-                        let hasNextLesson = false;
-                        let nextModIdx = selectedModuleIndex;
-                        let nextLesIdx = selectedLessonIndex + 1;
-
-                        if (selectedLessonIndex < totalLes - 1) {
-                          hasNextLesson = true;
-                        } else if (selectedModuleIndex < totalMods - 1) {
-                          if (selectedCourse.modules[selectedModuleIndex + 1]?.lessons?.length > 0) {
-                            hasNextLesson = true;
-                            nextModIdx = selectedModuleIndex + 1;
-                            nextLesIdx = 0;
-                          }
-                        }
+                        const hasNextParteInSameAula = selectedLessonIndex < totalPartes - 1;
+                        const hasNextAula = !hasNextParteInSameAula && selectedModuleIndex < totalAulas - 1;
 
                         return (
-                          <div className="mt-10 pt-6 border-t border-zinc-200 flex items-center justify-end">
-                            {hasNextLesson ? (
+                          <div className="mt-10 pt-6 border-t border-zinc-200 flex items-center justify-between flex-wrap gap-4">
+                            {/* Voltar para a parte anterior se disponível */}
+                            {selectedLessonIndex > 0 || selectedModuleIndex > 0 ? (
                               <button
                                 onClick={() => {
-                                  handleSelectLesson(selectedCourse, nextModIdx, nextLesIdx);
+                                  if (selectedLessonIndex > 0) {
+                                    handleSelectLesson(selectedCourse, selectedModuleIndex, selectedLessonIndex - 1);
+                                  } else if (selectedModuleIndex > 0) {
+                                    const prevAula = selectedCourse.modules[selectedModuleIndex - 1];
+                                    const lastParteIdx = Math.max(0, (prevAula?.lessons?.length || 1) - 1);
+                                    handleSelectLesson(selectedCourse, selectedModuleIndex - 1, lastParteIdx);
+                                  }
+                                  window.scrollTo({ top: 0, left: 0, behavior: "smooth" });
+                                }}
+                                className="px-4 py-2.5 bg-zinc-100 hover:bg-zinc-200 text-zinc-700 font-bold text-xs rounded-xl transition-all cursor-pointer flex items-center gap-1.5 border border-zinc-200"
+                              >
+                                <ChevronLeft className="w-4 h-4" />
+                                <span>Parte Anterior</span>
+                              </button>
+                            ) : (
+                              <div />
+                            )}
+
+                            {/* Próxima Parte / Próxima Aula / Concluir */}
+                            {hasNextParteInSameAula ? (
+                              <button
+                                onClick={async () => {
+                                  await markLessonComplete(selectedCourse.id, selectedModuleIndex, selectedLessonIndex);
+                                  handleSelectLesson(selectedCourse, selectedModuleIndex, selectedLessonIndex + 1);
+                                  window.scrollTo({ top: 0, left: 0, behavior: "smooth" });
+                                }}
+                                className="px-6 py-3 bg-[#0b439c] hover:bg-blue-800 text-white font-bold text-xs md:text-sm rounded-xl transition-all shadow-md flex items-center gap-2 cursor-pointer"
+                              >
+                                <span>Próxima Parte</span>
+                                <ChevronRight className="w-4 h-4" />
+                              </button>
+                            ) : hasNextAula ? (
+                              <button
+                                onClick={async () => {
+                                  await markLessonComplete(selectedCourse.id, selectedModuleIndex, selectedLessonIndex);
+                                  handleSelectLesson(selectedCourse, selectedModuleIndex + 1, 0);
                                   window.scrollTo({ top: 0, left: 0, behavior: "smooth" });
                                 }}
                                 className="px-6 py-3 bg-[#0b439c] hover:bg-blue-800 text-white font-bold text-xs md:text-sm rounded-xl transition-all shadow-md flex items-center gap-2 cursor-pointer"
@@ -9974,7 +10184,8 @@ export default function App() {
                               </button>
                             ) : (
                               <button
-                                onClick={() => {
+                                onClick={async () => {
+                                  await markLessonComplete(selectedCourse.id, selectedModuleIndex, selectedLessonIndex);
                                   setIsViewingCourseInfo(true);
                                   window.scrollTo({ top: 0, left: 0, behavior: "smooth" });
                                 }}
@@ -12723,7 +12934,7 @@ export default function App() {
                 Atenção: Você está prestes a excluir o curso <span className="underline font-black">"{courseToDelete.title}"</span>.
               </p>
               <p className="text-xs text-red-700 leading-relaxed">
-                Ao confirmar, o curso e todos os seus dados vinculados (módulos, aulas, notas de alunos e progresso) serão <strong>excluídos permanentemente</strong> do banco de dados.
+                Ao confirmar, o curso e todos os seus dados vinculados (aulas, partes, notas de alunos e progresso) serão <strong>excluídos permanentemente</strong> do banco de dados.
               </p>
             </div>
 
@@ -12919,7 +13130,7 @@ export default function App() {
         </div>
       )}
 
-      {/* Modal de Adicionar Módulo ou Aula */}
+      {/* Modal de Adicionar Aula ou Parte */}
       {moduleLessonCourse && (
         <div
           className="fixed inset-0 bg-black/60 backdrop-blur-xs z-[9999] flex items-center justify-center p-4 overflow-y-auto overscroll-contain"
@@ -12963,7 +13174,7 @@ export default function App() {
                     : "text-zinc-400 hover:text-zinc-600"
                 }`}
               >
-                + Novo Módulo
+                + Nova Aula
               </button>
               <button
                 type="button"
@@ -12974,7 +13185,7 @@ export default function App() {
                     : "text-zinc-400 hover:text-zinc-600"
                 }`}
               >
-                + Nova Aula de Texto
+                + Nova Parte de Estudo
               </button>
             </div>
 
@@ -12982,14 +13193,14 @@ export default function App() {
               {addType === "module" ? (
                 <div className="space-y-1.5">
                   <label className="text-xs font-bold text-zinc-600 uppercase tracking-wider block">
-                    Título do Novo Módulo
+                    Título da Nova Aula
                   </label>
                   <input
                     type="text"
                     required
                     value={addModuleTitle}
                     onChange={(e) => setAddModuleTitle(e.target.value)}
-                    placeholder="Ex: Módulo 2: Estruturas Avançadas"
+                    placeholder="Ex: Aula 2: Como organizar os passos de uma tarefa"
                     className="w-full bg-zinc-50 border border-zinc-200 rounded-xl px-3.5 py-2.5 text-sm font-semibold text-zinc-900 focus:outline-none focus:border-blue-600 focus:bg-white transition-all"
                   />
                 </div>
@@ -12997,7 +13208,7 @@ export default function App() {
                 <>
                   <div className="space-y-1.5">
                     <label className="text-xs font-bold text-zinc-600 uppercase tracking-wider block">
-                      Módulo de Destino
+                      Aula de Destino
                     </label>
                     <select
                       value={selectedTargetModuleIndex}
@@ -13006,7 +13217,7 @@ export default function App() {
                     >
                       {moduleLessonCourse.modules?.map((m, idx) => (
                         <option key={idx} value={idx}>
-                          Módulo {idx + 1}: {m.title}
+                          Aula {idx + 1}: {m.title}
                         </option>
                       ))}
                     </select>
@@ -13014,27 +13225,27 @@ export default function App() {
 
                   <div className="space-y-1.5">
                     <label className="text-xs font-bold text-zinc-600 uppercase tracking-wider block">
-                      Título da Aula
+                      Título da Parte
                     </label>
                     <input
                       type="text"
                       required
                       value={addLessonTitle}
                       onChange={(e) => setAddLessonTitle(e.target.value)}
-                      placeholder="Ex: Aula 1: Conceitos Iniciais"
+                      placeholder="Ex: Parte 1: O que é programação?"
                       className="w-full bg-zinc-50 border border-zinc-200 rounded-xl px-3.5 py-2.5 text-sm font-semibold text-zinc-900 focus:outline-none focus:border-blue-600 focus:bg-white transition-all"
                     />
                   </div>
 
                   <div className="space-y-1.5">
                     <label className="text-xs font-bold text-zinc-600 uppercase tracking-wider block">
-                      Conteúdo Escrito da Aula (Markdown)
+                      Conteúdo Escrito da Parte (Markdown)
                     </label>
                     <textarea
                       rows={5}
                       value={addLessonContent}
                       onChange={(e) => setAddLessonContent(e.target.value)}
-                      placeholder="# Título da Aula&#10;&#10;Escreva aqui o texto explicativo da aula..."
+                      placeholder="# Título da Parte&#10;&#10;Escreva aqui o texto explicativo da parte..."
                       className="w-full bg-zinc-50 border border-zinc-200 rounded-xl p-3.5 text-sm font-mono text-zinc-900 focus:outline-none focus:border-blue-600 focus:bg-white transition-all"
                     />
                   </div>
