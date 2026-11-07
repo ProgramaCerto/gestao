@@ -33,6 +33,9 @@ if (!token) {
 const remoteUrl = `https://x-access-token:${token}@github.com/${owner}/${repo}.git`;
 
 function ensureGit() {
+  try {
+    execSync('git config --global --add safe.directory /app/applet', { cwd: rootDir, stdio: 'ignore' });
+  } catch (e) {}
   if (!fs.existsSync(path.join(rootDir, '.git'))) {
     console.log('[git-sync] Inicializando repositorio git...');
     execSync('git init', { cwd: rootDir, stdio: 'inherit' });
