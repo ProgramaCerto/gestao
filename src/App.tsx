@@ -235,8 +235,22 @@ function getInitialRouteInfo() {
       }
     } else if (first === "projetos" || first === "meus-projetos" || first === "editor" || first === "editor-de-codigo") {
       activeTab = "projects";
-    } else if (first === "cursos" || first === "gestao-cursos" || first === "cursos-gestao" || first === "gestao-de-cursos" || first === "gestao-estudos") {
-      activeTab = "cursos_gestao";
+    } else if (
+      first === "cursos" ||
+      first === "gestao-cursos" ||
+      first === "cursos-gestao" ||
+      first === "gestao-de-cursos" ||
+      first === "gestao-estudos" ||
+      first === "gestao-de-estudos" ||
+      first === "gestao-de-estudo"
+    ) {
+      if (segments.length >= 2) {
+        activeTab = "lesson-view";
+        isViewingCourseInfo = true;
+        courseSlug = decodeURIComponent(segments.slice(1).join("/"));
+      } else {
+        activeTab = "cursos_gestao";
+      }
     } else if (first === "dados" && segments.length >= 2) {
       activeTab = "lesson-view";
       isViewingCourseInfo = true;
@@ -1555,10 +1569,10 @@ export default function App() {
       return "/usuarios";
     }
     if (activeTab === "projects") return "/projetos";
-    if (activeTab === "cursos_gestao") return "/gestão de cursos";
+    if (activeTab === "cursos_gestao") return "/gestao-de-estudos";
     if (activeTab === "lesson-view") {
       if (selectedCourse) {
-        return `/dados/${selectedCourse.title}`;
+        return `/dados/${slugifyCourse(selectedCourse.title)}`;
       }
       return "/dados";
     }
@@ -1625,7 +1639,7 @@ export default function App() {
         else if (targetPath === "/atendimento") document.title = "Central de Atendimento | Gestão Cursos Programa Certo";
         else if (targetPath === "/documentos") document.title = "Documentos | Gestão Cursos Programa Certo";
         else if (targetPath === "/trilhas" || targetPath === "/meus-estudos") document.title = "Meus Estudos | Gestão Cursos Programa Certo";
-        else if (targetPath === "/cursos" || targetPath === "/gestão de cursos" || targetPath === "/gestao-cursos" || targetPath === "/gestao-estudos") document.title = "Gestão de Estudos | Gestão Cursos Programa Certo";
+        else if (targetPath === "/cursos" || targetPath === "/gestão de cursos" || targetPath === "/gestao-cursos" || targetPath === "/gestao-estudos" || targetPath === "/gestao-de-estudos") document.title = "Gestão de Estudos | Gestão Cursos Programa Certo";
         else if (targetPath === "/meus-projetos") document.title = "Meus Projetos | Gestão Cursos Programa Certo";
         else if (targetPath === "/usuarios") document.title = "Usuários | Gestão Cursos Programa Certo";
         else if (targetPath.startsWith("/dados/")) {
@@ -1786,6 +1800,8 @@ export default function App() {
       clean === "cursos-gestao" ||
       clean === "gestao-de-cursos" ||
       clean === "gestao-estudos" ||
+      clean === "gestao-de-estudos" ||
+      clean === "gestao-de-estudo" ||
       clean === "gestão de cursos" ||
       clean === "gestao%20de%20cursos" ||
       clean === "gestao"
@@ -1795,7 +1811,7 @@ export default function App() {
       return;
     }
 
-    if (segments[0] === "dados" && segments.length >= 2) {
+    if ((segments[0] === "dados" || segments[0] === "gestao-de-estudos" || segments[0] === "cursos") && segments.length >= 2) {
       const courseParam = decodeURIComponent(segments.slice(1).join("/")).toLowerCase().trim();
       const matched = courses.find(c => 
         slugifyCourse(c.title).toLowerCase() === courseParam ||
