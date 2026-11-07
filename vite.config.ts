@@ -17,7 +17,7 @@ export default defineConfig(() => {
           name: 'Programa Certo',
           short_name: 'Prog Certo',
           description: 'Plataforma de ensino de tecnologia com cursos, aulas e projetos práticos.',
-          theme_color: '#0b439c',
+          theme_color: '#ffffff',
           background_color: '#ffffff',
           display: 'standalone',
           start_url: '/',

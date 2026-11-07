@@ -12,6 +12,8 @@ import {
   Clock, 
   CheckCircle2, 
   ChevronDown, 
+  ChevronUp,
+  GripVertical,
   Play, 
   MessageSquare, 
   Send, 
@@ -164,7 +166,7 @@ function getInitialRouteInfo() {
   let authMode: "login" | "forgot" = "login";
 
 
-  let activeTab: "dashboard" | "usuarios" | "atendimento" | "documentos" | "ocorrencias" | "notificacoes" | "perfil" | "termos" | "projects" | "cursos_gestao" = "dashboard";
+  let activeTab: "dashboard" | "usuarios" | "atendimento" | "documentos" | "ocorrencias" | "notificacoes" | "perfil" | "termos" | "projects" | "cursos_gestao" | "lesson-view" = "dashboard";
   let courseSlug = "";
   let lessonSlug = "";
   let isViewingCourseInfo = false;
@@ -233,10 +235,13 @@ function getInitialRouteInfo() {
       }
     } else if (first === "projetos" || first === "meus-projetos" || first === "editor" || first === "editor-de-codigo") {
       activeTab = "projects";
-    } else if (first === "cursos" || first === "gestao-cursos" || first === "cursos-gestao") {
+    } else if (first === "cursos" || first === "gestao-cursos" || first === "cursos-gestao" || first === "gestao-de-cursos" || first === "gestao-estudos") {
       activeTab = "cursos_gestao";
+    } else if (first === "dados" && segments.length >= 2) {
+      activeTab = "lesson-view";
+      isViewingCourseInfo = true;
+      courseSlug = decodeURIComponent(segments.slice(1).join("/"));
     } else {
-      // Qualquer outro link, subcaminho ou parâmetro sempre cai no dashboard (Darkborg)
       activeTab = "dashboard";
     }
   }
@@ -337,33 +342,57 @@ export default function App() {
   const [deleteErrorMsg, setDeleteErrorMsg] = useState("");
   const [isDeletingUser, setIsDeletingUser] = useState(false);
 
-  // Admin Course Management & Creation States
+  // Gestão de Estudos (Trilhas, Cursos, Aulas e Partes)
   const [adminCourseSearch, setAdminCourseSearch] = useState("");
   const [adminCourseViewMode, setAdminCourseViewMode] = useState<"table" | "cards">("cards");
+  
+  // Trilha Management States
+  const [isCreateTrilhaModalOpen, setIsCreateTrilhaModalOpen] = useState(false);
+  const [newTrilhaName, setNewTrilhaName] = useState("");
+  const [newTrilhaDescription, setNewTrilhaDescription] = useState("");
+  const [newTrilhaGradientColor, setNewTrilhaGradientColor] = useState("from-blue-600 to-indigo-600");
+  
+  const [editingTrilha, setEditingTrilha] = useState<Trilha | null>(null);
+  const [editTrilhaName, setEditTrilhaName] = useState("");
+  const [editTrilhaDescription, setEditTrilhaDescription] = useState("");
+  const [editTrilhaGradientColor, setEditTrilhaGradientColor] = useState("");
+  
+  const [trilhaToDelete, setTrilhaToDelete] = useState<Trilha | null>(null);
+  const [deleteTrilhaPassword, setDeleteTrilhaPassword] = useState("");
+  const [showDeleteTrilhaPassword, setShowDeleteTrilhaPassword] = useState(false);
+  const [deleteTrilhaErrorMsg, setDeleteTrilhaErrorMsg] = useState("");
+  const [isDeletingTrilha, setIsDeletingTrilha] = useState(false);
+
+  // Aula editing and collapse state
+  const [editingAula, setEditingAula] = useState<{ courseId: string; moduleIndex: number; title: string; aulaId?: number } | null>(null);
+  const [editAulaTitle, setEditAulaTitle] = useState("");
+  const [collapsedAulas, setCollapsedAulas] = useState<Record<number, boolean>>({});
+
+  // Course Creation States (NO INSTRUTOR)
   const [isCreateCourseModalOpen, setIsCreateCourseModalOpen] = useState(false);
   const [newCourseTitle, setNewCourseTitle] = useState("");
   const [newCourseDescription, setNewCourseDescription] = useState("");
   const [newCourseCategory, setNewCourseCategory] = useState("");
   const [newCourseLessons, setNewCourseLessons] = useState("");
-  const [newCourseInstructor, setNewCourseInstructor] = useState("");
   const [newCourseGradientColor, setNewCourseGradientColor] = useState("#ADD8E6, #000084");
   const [newCourseVisibility, setNewCourseVisibility] = useState<"Público" | "Privado" | "Rascunho">("Público");
+  const [newCourseTrilhaId, setNewCourseTrilhaId] = useState<string>("");
 
-  // Admin & Instructor Course Deletion Confirmation States
+  // Course Deletion Confirmation States
   const [courseToDelete, setCourseToDelete] = useState<Course | null>(null);
   const [deleteCoursePassword, setDeleteCoursePassword] = useState("");
   const [showDeleteCoursePassword, setShowDeleteCoursePassword] = useState(false);
   const [deleteCourseErrorMsg, setDeleteCourseErrorMsg] = useState("");
   const [isDeletingCourse, setIsDeletingCourse] = useState(false);
 
-  // Course Editing States
+  // Course Editing States (NO INSTRUTOR)
   const [editingCourse, setEditingCourse] = useState<Course | null>(null);
   const [editCourseTitle, setEditCourseTitle] = useState("");
   const [editCourseDescription, setEditCourseDescription] = useState("");
   const [editCourseCategory, setEditCourseCategory] = useState("");
-  const [editCourseInstructor, setEditCourseInstructor] = useState("");
   const [editCourseGradientColor, setEditCourseGradientColor] = useState("#ADD8E6, #000084");
   const [editCourseVisibility, setEditCourseVisibility] = useState<"Público" | "Privado" | "Rascunho">("Público");
+  const [editCourseTrilhaId, setEditCourseTrilhaId] = useState<string>("");
 
   // Add Module / Lesson Modal States
   const [moduleLessonCourse, setModuleLessonCourse] = useState<Course | null>(null);
@@ -1526,7 +1555,13 @@ export default function App() {
       return "/usuarios";
     }
     if (activeTab === "projects") return "/projetos";
-    if (activeTab === "cursos_gestao") return "/cursos";
+    if (activeTab === "cursos_gestao") return "/gestão de cursos";
+    if (activeTab === "lesson-view") {
+      if (selectedCourse) {
+        return `/dados/${selectedCourse.title}`;
+      }
+      return "/dados";
+    }
     return "/dashboard";
   };
 
@@ -1536,16 +1571,29 @@ export default function App() {
   const extractPathFromLocation = (): string => {
     if (typeof window === "undefined") return "";
     
-    // Check hash-based routing first if present (e.g. #/curso/nome-do-curso or #curso/nome-do-curso)
+    // Check hash-based routing first if present
     if (window.location.hash) {
       const hashPart = window.location.hash.replace(/^#\/?/, "").split("?")[0].trim();
-      if (hashPart) return hashPart;
+      if (hashPart) {
+        try {
+          return decodeURIComponent(hashPart);
+        } catch {
+          return hashPart;
+        }
+      }
     }
 
     // Otherwise check pathname
-    const pathname = window.location.pathname.replace(/^\/+|\/+$/g, "").trim();
-    if (pathname && pathname !== "index.html") {
-      return pathname;
+    try {
+      const pathname = decodeURIComponent(window.location.pathname).replace(/^\/+|\/+$/g, "").trim();
+      if (pathname && pathname !== "index.html") {
+        return pathname;
+      }
+    } catch {
+      const pathname = window.location.pathname.replace(/^\/+|\/+$/g, "").trim();
+      if (pathname && pathname !== "index.html") {
+        return pathname;
+      }
     }
     return "";
   };
@@ -1565,7 +1613,7 @@ export default function App() {
         }
 
         const targetPath = currentRoutePath;
-        const currentPathname = window.location.pathname;
+        const currentPathname = decodeURIComponent(window.location.pathname);
 
         // Update document title dynamically
         if ((targetPath.startsWith("/atendimento-") || targetPath.startsWith("/atendimento/")) && targetPath.endsWith("/pdf")) document.title = `Comprovante de Atendimento | Gestão Cursos Programa Certo`;
@@ -1577,11 +1625,12 @@ export default function App() {
         else if (targetPath === "/atendimento") document.title = "Central de Atendimento | Gestão Cursos Programa Certo";
         else if (targetPath === "/documentos") document.title = "Documentos | Gestão Cursos Programa Certo";
         else if (targetPath === "/trilhas" || targetPath === "/meus-estudos") document.title = "Meus Estudos | Gestão Cursos Programa Certo";
-        else if (targetPath === "/cursos") document.title = "Trilha de Estudo | Gestão Cursos Programa Certo";
+        else if (targetPath === "/cursos" || targetPath === "/gestão de cursos" || targetPath === "/gestao-cursos" || targetPath === "/gestao-estudos") document.title = "Gestão de Estudos | Gestão Cursos Programa Certo";
         else if (targetPath === "/meus-projetos") document.title = "Meus Projetos | Gestão Cursos Programa Certo";
         else if (targetPath === "/usuarios") document.title = "Usuários | Gestão Cursos Programa Certo";
-        else if (targetPath === "/gestao-cursos") document.title = "Gestão de Cursos | Gestão Cursos Programa Certo";
-        else if (selectedCourse && activeTab === "lesson-view") {
+        else if (targetPath.startsWith("/dados/")) {
+          document.title = selectedCourse ? `Dados: ${selectedCourse.title} | Gestão Cursos Programa Certo` : "Dados do Curso | Gestão Cursos Programa Certo";
+        } else if (selectedCourse && activeTab === "lesson-view") {
           const currentLesson = selectedCourse.modules?.[selectedModuleIndex]?.lessons?.[selectedLessonIndex];
           if (!isViewingCourseInfo && currentLesson?.title) {
             document.title = `${currentLesson.title} - ${selectedCourse.title} | Gestão Cursos Programa Certo`;
@@ -1731,9 +1780,37 @@ export default function App() {
       setActiveTab("projects");
       return;
     }
-    if (clean === "cursos" || clean === "gestao-cursos" || clean === "cursos-gestao") {
+    if (
+      clean === "cursos" ||
+      clean === "gestao-cursos" ||
+      clean === "cursos-gestao" ||
+      clean === "gestao-de-cursos" ||
+      clean === "gestao-estudos" ||
+      clean === "gestão de cursos" ||
+      clean === "gestao%20de%20cursos" ||
+      clean === "gestao"
+    ) {
       setActiveTab("cursos_gestao");
+      setIsViewingCourseInfo(false);
       return;
+    }
+
+    if (segments[0] === "dados" && segments.length >= 2) {
+      const courseParam = decodeURIComponent(segments.slice(1).join("/")).toLowerCase().trim();
+      const matched = courses.find(c => 
+        slugifyCourse(c.title).toLowerCase() === courseParam ||
+        slugify(c.title).toLowerCase() === courseParam ||
+        c.title.toLowerCase().trim() === courseParam ||
+        String(c.id).toLowerCase() === courseParam ||
+        `curso-db-${c.id}` === courseParam
+      );
+      if (matched) {
+        setSelectedCourse(matched);
+        setIsViewingCourseInfo(true);
+        setCourseInfoSourceTab("cursos_gestao");
+        setActiveTab("lesson-view");
+        return;
+      }
     }
 
     // Qualquer outro link direciona com segurança para o dashboard
@@ -2170,6 +2247,10 @@ export default function App() {
     showAllCoursesModal ||
     isAuthModalOpen ||
     courseToDelete ||
+    trilhaToDelete ||
+    editingTrilha ||
+    isCreateTrilhaModalOpen ||
+    editingAula ||
     editingCourse ||
     editingLesson ||
     userToDelete ||
@@ -2253,54 +2334,101 @@ export default function App() {
           for (const dbC of dbCursos) {
             const courseIdStr = String(dbC.id).startsWith("curso-db-") ? String(dbC.id) : `curso-db-${dbC.id}`;
             
-            // 1. Tenta carregar da nova estrutura oficial: Aulas (aulas_cursos) e Partes (partes_aulas)
+            // 1. Carrega da estrutura oficial: Aulas (aulas_cursos) e Partes (partes_aulas)
             let dbAulasCursos: any[] = [];
             try {
+              let acDataResult: any[] | null = null;
               const { data: acData } = await supabase
                 .from("aulas_cursos")
                 .select("*")
-                .eq("id_do_curso", dbC.id)
-                .order("ordem", { ascending: true });
+                .eq("id_do_curso", dbC.id);
               if (acData && acData.length > 0) {
-                dbAulasCursos = acData;
+                acDataResult = acData;
+              } else {
+                // Tenta carregar de aulas_dos_cursos se aulas_cursos não tiver ou não existir
+                const { data: adcData } = await supabase
+                  .from("aulas_dos_cursos")
+                  .select("*")
+                  .eq("id_do_curso", dbC.id);
+                if (adcData && adcData.length > 0) {
+                  acDataResult = adcData;
+                }
               }
-            } catch {}
+
+              if (acDataResult && acDataResult.length > 0) {
+                acDataResult.sort((a: any, b: any) => {
+                  const numA = Number(a.numero_aula ?? a.numero_da_aula ?? a.ordem ?? a.id) || 0;
+                  const numB = Number(b.numero_aula ?? b.numero_da_aula ?? b.ordem ?? b.id) || 0;
+                  return numA - numB;
+                });
+                dbAulasCursos = acDataResult;
+              }
+            } catch (err) {
+              console.warn("Aviso ao carregar aulas_cursos:", err);
+            }
 
             let dbPartesAulas: any[] = [];
             try {
               const { data: paData } = await supabase
                 .from("partes_aulas")
                 .select("*")
-                .eq("id_do_curso", dbC.id)
-                .order("numero_da_parte", { ascending: true });
+                .eq("id_do_curso", dbC.id);
               if (paData && paData.length > 0) {
+                paData.sort((a: any, b: any) => {
+                  const numA = Number(a.numero_da_parte ?? a.numero_parte ?? a.id) || 0;
+                  const numB = Number(b.numero_da_parte ?? b.numero_parte ?? b.id) || 0;
+                  return numA - numB;
+                });
                 dbPartesAulas = paData;
               }
-            } catch {}
+            } catch (err) {
+              console.warn("Aviso ao carregar partes_aulas:", err);
+            }
 
             let courseAulas: AulaCurso[] = [];
             let parsedModules: { title: string; lessons: Lesson[]; aulaId?: number }[] = [];
 
             if (dbAulasCursos && dbAulasCursos.length > 0) {
-              // Nova arquitetura oficial: Curso -> Aulas (aulas_cursos) -> Partes (partes_aulas)
+              // Arquitetura oficial: Curso -> Aulas (aulas_cursos / aulas_dos_cursos) -> Partes (partes_aulas)
               courseAulas = dbAulasCursos.map((ac: any, aIdx: number) => {
+                const aulaTitle = (ac.titulo_aula || ac.nome_da_aula || `Aula ${aIdx + 1}`).trim();
+                
                 // Partes estritamente pertencentes a esta aula específica
-                const aulaPartes: ParteAula[] = (dbPartesAulas || [])
+                let aulaPartes: ParteAula[] = (dbPartesAulas || [])
                   .filter((p: any) => Number(p.id_aula) === Number(ac.id))
-                  .sort((a: any, b: any) => (Number(a.numero_da_parte) || 0) - (Number(b.numero_da_parte) || 0));
+                  .sort((a: any, b: any) => (Number(a.numero_da_parte ?? a.numero_parte ?? a.id) || 0) - (Number(b.numero_da_parte ?? b.numero_parte ?? b.id) || 0));
+
+                // Se não há partes cadastradas na tabela partes_aulas para esta aula, mas ela possui conteúdo/teste diretamente na linha:
+                if (aulaPartes.length === 0 && (ac.conteudo || ac.nome_do_teste)) {
+                  aulaPartes.push({
+                    id: Number(ac.id) * 1000 + 1,
+                    id_do_curso: Number(ac.id_do_curso || dbC.id),
+                    id_aula: Number(ac.id),
+                    numero_da_parte: 1,
+                    nome_da_parte: ac.nome_da_aula || aulaTitle,
+                    conteudo: ac.conteudo,
+                    nome_do_teste: ac.nome_do_teste,
+                    alternativa_a: ac.alternativa_a,
+                    alternativa_b: ac.alternativa_b,
+                    alternativa_c: ac.alternativa_c,
+                    alternativa_d: ac.alternativa_d,
+                    alternativa_certa: ac.alternativa_certa
+                  });
+                }
 
                 return {
                   id: Number(ac.id),
                   id_do_curso: Number(ac.id_do_curso || dbC.id),
-                  titulo_aula: ac.titulo_aula || `Aula ${aIdx + 1}`,
-                  ordem: Number(ac.ordem) || (aIdx + 1),
+                  titulo_aula: aulaTitle,
+                  numero_aula: Number(ac.numero_aula ?? ac.numero_da_aula ?? ac.ordem) || (aIdx + 1),
+                  ordem: Number(ac.numero_aula ?? ac.numero_da_aula ?? ac.ordem) || (aIdx + 1),
                   posicao_apos_aula: ac.posicao_apos_aula !== null && ac.posicao_apos_aula !== undefined ? Number(ac.posicao_apos_aula) : undefined,
                   partes: aulaPartes
                 };
               });
 
               parsedModules = courseAulas.map((aula, aIdx) => {
-                const lessons: Lesson[] = (aula.partes || []).map((p, pIdx) => {
+                let lessons: Lesson[] = (aula.partes || []).map((p, pIdx) => {
                   const quizList: QuizQuestion[] = [];
                   if (p.nome_do_teste) {
                     const opts = [p.alternativa_a, p.alternativa_b, p.alternativa_c, p.alternativa_d].filter(Boolean) as string[];
@@ -2323,9 +2451,8 @@ export default function App() {
                   };
                 });
 
-                return {
-                  title: aula.titulo_aula,
-                  lessons: lessons.length > 0 ? lessons : [
+                if (lessons.length === 0) {
+                  lessons = [
                     {
                       id: aula.id * 1000 + 1,
                       title: `Parte 1: ${aula.titulo_aula}`,
@@ -2333,38 +2460,25 @@ export default function App() {
                       duration: "10 min",
                       quiz: []
                     }
-                  ],
+                  ];
+                }
+
+                return {
+                  title: aula.titulo_aula,
+                  lessons: lessons,
                   aulaId: aula.id
                 };
               });
             } else {
-              // Fallback para esquemas legados (modulos / aulas_dos_cursos)
-              let dbModulos: any[] = [];
-              try {
-                const { data: mData } = await supabase
-                  .from("modulos")
-                  .select("*")
-                  .eq("id_do_curso", dbC.id)
-                  .order("ordem", { ascending: true });
-                if (mData) dbModulos = mData;
-              } catch {}
-
+              // Fallback para cursos legados com aulas_dos_cursos:
               let dbAulas: any[] = [];
               try {
                 const { data: aData } = await supabase
                   .from("aulas_dos_cursos")
                   .select("*")
-                  .eq("id_do_curso", dbC.id)
-                  .order("numero_da_aula", { ascending: true });
-                if (aData) {
+                  .eq("id_do_curso", dbC.id);
+                if (aData && aData.length > 0) {
                   dbAulas = aData;
-                } else {
-                  const fb = await supabase
-                    .from("aulas_dos_cursos")
-                    .select("*")
-                    .eq("id_do_curso", dbC.id)
-                    .order("id", { ascending: true });
-                  if (fb.data) dbAulas = fb.data;
                 }
               } catch {}
 
@@ -2382,31 +2496,23 @@ export default function App() {
                 }
                 return {
                   id: a.id,
-                  title: a.nome_da_aula,
+                  title: a.nome_da_aula || `Parte 1`,
                   content: a.conteudo || "Conteúdo em breve.",
                   duration: "15 min",
                   quiz: quizList
                 };
               };
 
-              if (dbModulos && dbModulos.length > 0) {
-                parsedModules = dbModulos.map((mod: any) => {
-                  const moduleLessons = (dbAulas || [])
-                    .filter((a: any) => String(a.id_do_modulo) === String(mod.id) || (!a.id_do_modulo && mod.ordem === 1))
-                    .map(mapLesson);
-
+              // Cada item de aulas_dos_cursos é uma AULA individual!
+              if (dbAulas && dbAulas.length > 0) {
+                parsedModules = dbAulas.map((a: any, aIdx: number) => {
+                  const aulaTitle = a.nome_da_aula || `Aula ${aIdx + 1}`;
                   return {
-                    title: mod.titulo_aula || mod.titulo_do_modulo || mod.nome_do_modulo || "Aula",
-                    lessons: moduleLessons
+                    title: aulaTitle,
+                    aulaId: a.id,
+                    lessons: [mapLesson(a)]
                   };
                 });
-              } else if (dbAulas && dbAulas.length > 0) {
-                parsedModules = [
-                  {
-                    title: "Aula Principal",
-                    lessons: dbAulas.map(mapLesson)
-                  }
-                ];
               }
             }
 
@@ -2454,6 +2560,13 @@ export default function App() {
           try {
             localStorage.setItem("aluradev_courses_cache", JSON.stringify(mergedCourses));
           } catch (e) {}
+
+          // Mantém selectedCourse sincronizado com os dados completos recém-carregados
+          setSelectedCourse(prev => {
+            if (!prev) return null;
+            const updated = mergedCourses.find(c => c.id === prev.id || c.title.trim().toLowerCase() === prev.title.trim().toLowerCase());
+            return updated || prev;
+          });
         } else if (localCustomCourses.length > 0) {
           setCourses(localCustomCourses);
         }
@@ -4119,6 +4232,366 @@ export default function App() {
     setTimeout(() => setEditUserSuccessMsg(null), 5000);
   };
 
+  // ==================== GESTÃO DE ESTUDOS: TRILHAS HANDLERS ====================
+  const handleOpenCreateTrilha = () => {
+    setNewTrilhaName("");
+    setNewTrilhaDescription("");
+    setNewTrilhaGradientColor("from-blue-600 to-indigo-600");
+    setIsCreateTrilhaModalOpen(true);
+  };
+
+  const handleCreateTrilha = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newTrilhaName.trim()) {
+      alert("Por favor, preencha o nome da trilha de estudo.");
+      return;
+    }
+
+    const tempId = Date.now();
+    const newTrilhaObj: Trilha = {
+      id: tempId,
+      nome_da_trilha: newTrilhaName.trim(),
+      descricao: newTrilhaDescription.trim(),
+      gradient_color: newTrilhaGradientColor.trim() || "from-blue-600 to-indigo-600",
+      criado_em: new Date().toISOString()
+    };
+
+    if (supabase) {
+      try {
+        const { data, error } = await supabase.from("trilha_de_estudo").insert({
+          nome_da_trilha: newTrilhaName.trim(),
+          descricao: newTrilhaDescription.trim(),
+          gradient_color: newTrilhaGradientColor.trim() || "from-blue-600 to-indigo-600"
+        }).select().maybeSingle();
+
+        if (data?.id) {
+          newTrilhaObj.id = data.id;
+        } else if (error) {
+          try {
+            const fbRes = await supabase.from("trilhas").insert({
+              nome_da_trilha: newTrilhaName.trim(),
+              descricao: newTrilhaDescription.trim(),
+              gradient_color: newTrilhaGradientColor.trim()
+            }).select().maybeSingle();
+            if (fbRes.data?.id) newTrilhaObj.id = fbRes.data.id;
+          } catch {}
+        }
+      } catch (err) {
+        console.error("Erro ao inserir trilha no Supabase:", err);
+      }
+    }
+
+    setTrilhas(prev => [...prev, newTrilhaObj]);
+    setIsCreateTrilhaModalOpen(false);
+    setNewTrilhaName("");
+    setNewTrilhaDescription("");
+    alert(`Trilha "${newTrilhaObj.nome_da_trilha}" criada com sucesso!`);
+  };
+
+  const handleOpenEditTrilha = (trilha: Trilha) => {
+    setEditingTrilha(trilha);
+    setEditTrilhaName(trilha.nome_da_trilha || "");
+    setEditTrilhaDescription(trilha.descricao || "");
+    setEditTrilhaGradientColor(trilha.gradient_color || "from-blue-600 to-indigo-600");
+  };
+
+  const handleSaveEditTrilha = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingTrilha || !editTrilhaName.trim()) return;
+
+    const updatedTrilhaObj: Trilha = {
+      ...editingTrilha,
+      nome_da_trilha: editTrilhaName.trim(),
+      descricao: editTrilhaDescription.trim(),
+      gradient_color: editTrilhaGradientColor.trim() || "from-blue-600 to-indigo-600"
+    };
+
+    setTrilhas(prev => prev.map(t => t.id === editingTrilha.id ? updatedTrilhaObj : t));
+
+    if (supabase) {
+      try {
+        await supabase.from("trilha_de_estudo").update({
+          nome_da_trilha: editTrilhaName.trim(),
+          descricao: editTrilhaDescription.trim(),
+          gradient_color: editTrilhaGradientColor.trim()
+        }).eq("id", editingTrilha.id);
+      } catch (err) {
+        try {
+          await supabase.from("trilhas").update({
+            nome_da_trilha: editTrilhaName.trim(),
+            descricao: editTrilhaDescription.trim()
+          }).eq("id", editingTrilha.id);
+        } catch {}
+      }
+    }
+
+    setEditingTrilha(null);
+    alert(`Dados da trilha "${updatedTrilhaObj.nome_da_trilha}" atualizados com sucesso!`);
+  };
+
+  const handleRequestDeleteTrilha = (trilha: Trilha) => {
+    setTrilhaToDelete(trilha);
+    setDeleteTrilhaPassword("");
+    setShowDeleteTrilhaPassword(false);
+    setDeleteTrilhaErrorMsg("");
+  };
+
+  const handleConfirmDeleteTrilha = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!trilhaToDelete) return;
+
+    const inputPass = deleteTrilhaPassword.trim();
+    if (!inputPass) {
+      setDeleteTrilhaErrorMsg("Por favor, digite sua senha de acesso para autorizar a exclusão em cascata.");
+      return;
+    }
+
+    const loggedInUserObj = allUsers.find(u => u.id === user?.id || u.email?.toLowerCase() === user?.email?.toLowerCase());
+    const knownPass = (user as any)?.password || authPassword || loggedInUserObj?.password;
+
+    if (knownPass && !passwordsMatch(knownPass, inputPass)) {
+      setDeleteTrilhaErrorMsg("Senha incorreta. Por favor, digite a senha atual que você usa para fazer login.");
+      return;
+    }
+
+    setIsDeletingTrilha(true);
+    const targetTrilhaId = trilhaToDelete.id;
+    const targetTitle = trilhaToDelete.nome_da_trilha;
+
+    try {
+      const coursesInThisTrilha = courses.filter(c => Number(c.id_trilha) === Number(targetTrilhaId));
+
+      if (supabase) {
+        for (const course of coursesInThisTrilha) {
+          const numericId = parseInt(course.id.replace("curso-db-", ""), 10);
+          if (!isNaN(numericId)) {
+            try {
+              await supabase.from("partes_aulas_concluidas").delete().eq("id_do_curso", numericId);
+            } catch {}
+            try {
+              await supabase.from("partes_aulas").delete().eq("id_do_curso", numericId);
+            } catch {}
+            try {
+              await supabase.from("aulas_cursos").delete().eq("id_do_curso", numericId);
+            } catch {}
+            try {
+              await supabase.from("aulas_dos_cursos").delete().eq("id_do_curso", numericId);
+            } catch {}
+            try {
+              await supabase.from("modulos").delete().eq("id_do_curso", numericId);
+            } catch {}
+            try {
+              await supabase.from("progresso").delete().eq("id_do_curso", numericId);
+            } catch {}
+            try {
+              await supabase.from("cursos_concluidos").delete().eq("id_do_curso", numericId);
+            } catch {}
+            try {
+              await supabase.from("cursos").delete().eq("id", numericId);
+            } catch {}
+          }
+          try {
+            await supabase.from("courses").delete().eq("id", course.id);
+          } catch {}
+        }
+
+        try {
+          await supabase.from("trilha_de_estudo").delete().eq("id", targetTrilhaId);
+        } catch {}
+        try {
+          await supabase.from("trilhas").delete().eq("id", targetTrilhaId);
+        } catch {}
+      }
+
+      setCourses(prev => prev.filter(c => Number(c.id_trilha) !== Number(targetTrilhaId)));
+      setTrilhas(prev => prev.filter(t => t.id !== targetTrilhaId));
+
+      try {
+        const storedCustomCourses = localStorage.getItem("aluradev_custom_courses");
+        if (storedCustomCourses) {
+          const parsed = JSON.parse(storedCustomCourses) as Course[];
+          const filtered = parsed.filter(c => Number(c.id_trilha) !== Number(targetTrilhaId));
+          localStorage.setItem("aluradev_custom_courses", JSON.stringify(filtered));
+        }
+      } catch {}
+
+      setTrilhaToDelete(null);
+      setDeleteTrilhaPassword("");
+      setDeleteTrilhaErrorMsg("");
+      alert(`A trilha "${targetTitle}" e todos os seus ${coursesInThisTrilha.length} cursos, aulas e partes foram excluídos com sucesso!`);
+    } catch (err) {
+      console.error("Erro ao excluir trilha em cascata:", err);
+      setDeleteTrilhaErrorMsg("Ocorreu um erro ao excluir a trilha. Tente novamente.");
+    } finally {
+      setIsDeletingTrilha(false);
+    }
+  };
+
+  // ==================== GESTÃO DE ESTUDOS: AULAS E PARTES REORDERING & EDITING ====================
+  const handleMoveAula = async (courseId: string, fromIndex: number, toIndex: number) => {
+    const courseObj = courses.find(c => c.id === courseId) || selectedCourse;
+    if (!courseObj || !courseObj.modules) return;
+    if (toIndex < 0 || toIndex >= courseObj.modules.length) return;
+
+    const newModules = [...courseObj.modules];
+    const [movedAula] = newModules.splice(fromIndex, 1);
+    newModules.splice(toIndex, 0, movedAula);
+
+    const updatedCourse: Course = {
+      ...courseObj,
+      modules: newModules
+    };
+
+    setCourses(prev => prev.map(c => c.id === courseId ? updatedCourse : c));
+    if (selectedCourse?.id === courseId) {
+      setSelectedCourse(updatedCourse);
+    }
+
+    if (supabase) {
+      for (let i = 0; i < newModules.length; i++) {
+        const mod = newModules[i];
+        if (mod.aulaId) {
+          try {
+            await supabase.from("aulas_cursos").update({
+              numero_aula: i + 1
+            }).eq("id", mod.aulaId);
+          } catch (err) {
+            console.error("Erro ao atualizar ordem da aula:", err);
+          }
+        }
+      }
+    }
+  };
+
+  const handleMoveParte = async (courseId: string, moduleIndex: number, fromIndex: number, toIndex: number) => {
+    const courseObj = courses.find(c => c.id === courseId) || selectedCourse;
+    if (!courseObj || !courseObj.modules?.[moduleIndex]?.lessons) return;
+    const lessonsList = courseObj.modules[moduleIndex].lessons;
+    if (toIndex < 0 || toIndex >= lessonsList.length) return;
+
+    const newLessons = [...lessonsList];
+    const [movedParte] = newLessons.splice(fromIndex, 1);
+    newLessons.splice(toIndex, 0, movedParte);
+
+    const updatedModules = courseObj.modules.map((m, idx) => {
+      if (idx === moduleIndex) {
+        return { ...m, lessons: newLessons };
+      }
+      return m;
+    });
+
+    const updatedCourse: Course = {
+      ...courseObj,
+      modules: updatedModules
+    };
+
+    setCourses(prev => prev.map(c => c.id === courseId ? updatedCourse : c));
+    if (selectedCourse?.id === courseId) {
+      setSelectedCourse(updatedCourse);
+    }
+
+    if (supabase) {
+      for (let i = 0; i < newLessons.length; i++) {
+        const p = newLessons[i];
+        const parteId = p.id || p.parteDb?.id;
+        if (parteId && typeof parteId === "number") {
+          try {
+            await supabase.from("partes_aulas").update({
+              numero_da_parte: i + 1
+            }).eq("id", parteId);
+          } catch (err) {
+            console.error("Erro ao atualizar ordem da parte:", err);
+          }
+        }
+      }
+    }
+  };
+
+  const handleOpenEditAula = (courseId: string, moduleIndex: number, currentTitle: string, aulaId?: number) => {
+    setEditingAula({
+      courseId,
+      moduleIndex,
+      title: currentTitle,
+      aulaId
+    });
+    setEditAulaTitle(currentTitle);
+  };
+
+  const handleSaveEditAula = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingAula || !editAulaTitle.trim()) return;
+
+    const courseObj = courses.find(c => c.id === editingAula.courseId) || selectedCourse;
+    if (!courseObj) return;
+
+    const updatedModules = (courseObj.modules || []).map((m, idx) => {
+      if (idx === editingAula.moduleIndex) {
+        return { ...m, title: editAulaTitle.trim() };
+      }
+      return m;
+    });
+
+    const updatedCourse: Course = {
+      ...courseObj,
+      modules: updatedModules
+    };
+
+    setCourses(prev => prev.map(c => c.id === editingAula.courseId ? updatedCourse : c));
+    if (selectedCourse?.id === editingAula.courseId) {
+      setSelectedCourse(updatedCourse);
+    }
+
+    if (supabase && editingAula.aulaId) {
+      try {
+        await supabase.from("aulas_cursos").update({
+          titulo_aula: editAulaTitle.trim()
+        }).eq("id", editingAula.aulaId);
+      } catch (err) {
+        console.error("Erro ao atualizar título da aula no Supabase:", err);
+      }
+    }
+
+    setEditingAula(null);
+  };
+
+  const handleDeleteAula = async (courseId: string, moduleIndex: number) => {
+    const courseObj = courses.find(c => c.id === courseId) || selectedCourse;
+    if (!courseObj || !courseObj.modules?.[moduleIndex]) return;
+
+    const targetAula = courseObj.modules[moduleIndex];
+    const aulaTitle = targetAula.title;
+    if (!confirm(`Tem certeza que deseja excluir a "${aulaTitle}" e todas as suas ${targetAula.lessons?.length || 0} partes?`)) return;
+
+    const updatedModules = courseObj.modules.filter((_, idx) => idx !== moduleIndex);
+    const updatedCourse: Course = {
+      ...courseObj,
+      modules: updatedModules
+    };
+
+    setCourses(prev => prev.map(c => c.id === courseId ? updatedCourse : c));
+    if (selectedCourse?.id === courseId) {
+      setSelectedCourse(updatedCourse);
+    }
+
+    if (supabase && targetAula.aulaId) {
+      try {
+        await supabase.from("partes_aulas").delete().eq("id_aula", targetAula.aulaId);
+      } catch {}
+      try {
+        await supabase.from("aulas_cursos").delete().eq("id", targetAula.aulaId);
+      } catch {}
+    }
+
+    alert(`Aula "${aulaTitle}" e suas partes foram excluídas com sucesso.`);
+  };
+
+  const toggleAulaCollapsed = (moduleIndex: number) => {
+    setCollapsedAulas(prev => ({
+      ...prev,
+      [moduleIndex]: !prev[moduleIndex]
+    }));
+  };
+
   const handleAdminCreateCourse = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newCourseTitle.trim() || !newCourseDescription.trim()) {
@@ -4126,29 +4599,24 @@ export default function App() {
       return;
     }
 
-    const instructorName = newCourseInstructor.trim() || studentName || "Instrutor da Plataforma";
     const categoryName = newCourseCategory.trim() || "Desenvolvimento";
-    const numLessons = parseInt(newCourseLessons) || 10;
-    const lessonsLabel = newCourseLessons.trim().includes("aula") ? newCourseLessons.trim() : `${numLessons} aulas`;
+    const numLessons = parseInt(newCourseLessons) || 5;
+    const lessonsLabel = `${numLessons} aulas`;
+    const targetTrilhaId = newCourseTrilhaId ? Number(newCourseTrilhaId) : null;
 
     const newCourseId = `curso-db-${Date.now()}`;
     const defaultModules = [
       {
-        title: "Aula 1: Conteúdo Principal",
-        lessons: Array.from({ length: Math.min(Math.max(1, numLessons), 50) }, (_, i) => ({
-          title: `Parte ${i + 1}: ${newCourseTitle.trim()}`,
-          duration: "10 min",
-          content: `# ${newCourseTitle.trim()} - Parte ${i + 1}\n\nNesta parte do curso de **${categoryName}**, estudaremos os conceitos de **${newCourseTitle.trim()}** ministrado por **${instructorName}**.\n\n### Tópicos Abordados:\n1. Apresentação e Conceitos Iniciais\n2. Atividades e Práticas\n3. Revisão e Avaliação`,
-          videoUrl: "https://www.youtube.com/embed/dQw4w9WgXcQ",
-          quiz: [
-            {
-              question: `Qual é o tema principal da Parte ${i + 1}?`,
-              options: [categoryName, "Teoria Geral", "Outro assunto", "Nenhum"],
-              correctAnswer: 0,
-              explanation: `Tema focado em ${categoryName}.`
-            }
-          ]
-        }))
+        title: "Aula 1: Conceito Inicial",
+        lessons: [
+          {
+            title: `Parte 1: Apresentação de ${newCourseTitle.trim()}`,
+            duration: "10 min",
+            content: `# ${newCourseTitle.trim()} - Introdução\n\nBem-vindo a este novo curso da plataforma.\n\n### Conteúdo da Aula\nAprenda os princípios e a prática deste conteúdo.`,
+            videoUrl: "",
+            quiz: []
+          }
+        ]
       }
     ];
 
@@ -4158,13 +4626,13 @@ export default function App() {
       category: categoryName,
       description: newCourseDescription.trim(),
       duration: lessonsLabel,
-      instructor: instructorName,
       gradientColor: newCourseGradientColor.trim() || "#ADD8E6, #000084",
       visibility: newCourseVisibility,
       lessonsCount: lessonsLabel,
       icon: "BookOpen",
       imageUrl: "https://images.unsplash.com/photo-1517694712202-14dd9538aa97?w=600&auto=format&fit=crop&q=80",
       isCustom: true,
+      id_trilha: targetTrilhaId,
       modules: defaultModules
     };
 
@@ -4187,6 +4655,9 @@ export default function App() {
           aulas: numLessons,
           gradiente_color: newCourseGradientColor.trim() || "#ADD8E6, #000084"
         };
+        if (targetTrilhaId) {
+          payload.id_trilha = targetTrilhaId;
+        }
 
         let { data: insertedC, error: cErr } = await supabase
           .from("cursos")
@@ -4195,34 +4666,33 @@ export default function App() {
           .maybeSingle();
 
         if (cErr) {
-          console.warn("Primeira tentativa de inserção em 'cursos' com payload completo falhou, tentando fallback com campos básicos:", cErr);
-          const fallbackPayload = {
+          console.warn("Primeira tentativa com payload completo falhou, tentando fallback com campos básicos:", cErr);
+          const fallbackPayload: any = {
             nome_do_curso: newCourseTitle.trim(),
             descricao: newCourseDescription.trim(),
-            categoria: categoryName,
-            instrutor: instructorName
+            categoria: categoryName
           };
-          const res = await supabase
-            .from("cursos")
-            .insert(fallbackPayload)
-            .select()
-            .maybeSingle();
-
-          if (!res.error && res.data) {
-            insertedC = res.data;
-          } else {
-            console.error("Erro ao inserir na tabela 'cursos' do Supabase:", res.error);
-          }
+          if (targetTrilhaId) fallbackPayload.id_trilha = targetTrilhaId;
+          const res = await supabase.from("cursos").insert(fallbackPayload).select().maybeSingle();
+          if (!res.error && res.data) insertedC = res.data;
         }
 
-        if (insertedC) {
-          for (let i = 1; i <= numLessons; i++) {
-            await supabase.from("aulas_dos_cursos").insert({
+        if (insertedC?.id) {
+          // Cria Aula 1 na tabela oficial aulas_cursos
+          const { data: newAulaRow } = await supabase.from("aulas_cursos").insert({
+            id_do_curso: insertedC.id,
+            titulo_aula: "Aula 1: Conceito Inicial",
+            numero_aula: 1
+          }).select().maybeSingle();
+
+          if (newAulaRow?.id) {
+            // Cria Parte 1 na tabela oficial partes_aulas
+            await supabase.from("partes_aulas").insert({
               id_do_curso: insertedC.id,
-              numero_da_aula: i,
-              aula: i,
-              nome_da_aula: `Aula ${i}: ${newCourseTitle.trim()}`,
-              conteudo: `# ${newCourseTitle.trim()} - Aula ${i}\n\nNesta aula do curso de **${categoryName}**, estudaremos os conceitos de **${newCourseTitle.trim()}** ministrado por **${instructorName}**.`
+              id_aula: newAulaRow.id,
+              numero_da_parte: 1,
+              nome_da_parte: `Parte 1: Apresentação de ${newCourseTitle.trim()}`,
+              conteudo: `# ${newCourseTitle.trim()} - Introdução\n\nBem-vindo a este novo curso da plataforma.`
             });
           }
         }
@@ -4233,12 +4703,9 @@ export default function App() {
             title: newCourseTitle.trim(),
             description: newCourseDescription.trim(),
             category: categoryName,
-            instructor: instructorName,
             is_custom: true
           });
-        } catch (legacyErr) {
-          console.warn("Aviso ao salvar na tabela 'courses':", legacyErr);
-        }
+        } catch (legacyErr) {}
 
         // Recarregar dados diretamente do Supabase
         await loadDataFromSupabase(user);
@@ -4252,9 +4719,9 @@ export default function App() {
     setNewCourseDescription("");
     setNewCourseCategory("");
     setNewCourseLessons("");
-    setNewCourseInstructor("");
     setNewCourseGradientColor("#ADD8E6, #000084");
     setNewCourseVisibility("Público");
+    setNewCourseTrilhaId("");
     setIsCreateCourseModalOpen(false);
     alert("Curso cadastrado com sucesso!");
   };
@@ -4370,9 +4837,9 @@ export default function App() {
     setEditCourseTitle(courseObj.title || "");
     setEditCourseDescription(courseObj.description || "");
     setEditCourseCategory(courseObj.category || "");
-    setEditCourseInstructor(courseObj.instructor || "");
     setEditCourseGradientColor(courseObj.gradientColor || "#ADD8E6, #000084");
     setEditCourseVisibility((courseObj.visibility as any) || "Público");
+    setEditCourseTrilhaId(courseObj.id_trilha ? String(courseObj.id_trilha) : "");
   };
 
   const handleSaveEditCourse = async (e: React.FormEvent) => {
@@ -4384,14 +4851,15 @@ export default function App() {
       return;
     }
 
+    const targetTrilhaId = editCourseTrilhaId ? Number(editCourseTrilhaId) : null;
     const updatedCourseObj: Course = {
       ...editingCourse,
       title: editCourseTitle.trim(),
       description: editCourseDescription.trim(),
       category: editCourseCategory.trim() || "Desenvolvimento",
-      instructor: editCourseInstructor.trim() || "Instrutor da Plataforma",
       gradientColor: editCourseGradientColor.trim() || "#ADD8E6, #000084",
-      visibility: editCourseVisibility
+      visibility: editCourseVisibility,
+      id_trilha: targetTrilhaId
     };
 
     setCourses(prev => prev.map(c => c.id === editingCourse.id ? updatedCourseObj : c));
@@ -4418,7 +4886,8 @@ export default function App() {
             nome_do_curso: editCourseTitle.trim(),
             descricao: editCourseDescription.trim(),
             categoria: editCourseCategory.trim(),
-            gradiente_color: editCourseGradientColor.trim()
+            gradiente_color: editCourseGradientColor.trim(),
+            id_trilha: targetTrilhaId
           }).eq("id", numericId);
         } catch (err) {
           console.error("Erro ao atualizar curso no Supabase:", err);
@@ -4462,8 +4931,7 @@ export default function App() {
             const { data: newAulaRow } = await supabase.from("aulas_cursos").insert({
               id_do_curso: numericId,
               titulo_aula: addModuleTitle.trim(),
-              ordem: (moduleLessonCourse.modules || []).length + 1,
-              posicao_apos_aula: 0
+              numero_aula: (moduleLessonCourse.modules || []).length + 1
             }).select().maybeSingle();
 
             if (newAulaRow?.id) {
@@ -6772,7 +7240,7 @@ export default function App() {
                 }`}
               >
                 <BookOpen className="w-5 h-5 shrink-0" />
-                <span>GESTÃO DE CURSOS</span>
+                <span>GESTÃO DE ESTUDOS</span>
               </button>
 
               <button
@@ -6907,36 +7375,36 @@ export default function App() {
         >
           {/* Top Bar para Telas Pequenas / Mobile */}
           <header className="md:hidden w-full bg-white border-b border-zinc-200 h-16 flex items-center justify-between px-4 sticky top-0 z-30 shrink-0 shadow-xs">
-              <div className="flex items-center gap-3">
-                <button
-                  type="button"
-                  onClick={() => setIsMobileMenuOpen(true)}
-                  className="p-2.5 rounded-xl hover:bg-zinc-100 text-zinc-700 transition-colors border border-zinc-200 cursor-pointer flex items-center justify-center shrink-0"
-                  aria-label="Abrir menu de navegação"
-                >
-                  <Menu className="w-5 h-5 text-zinc-800" />
-                </button>
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => setIsMobileMenuOpen(true)}
+                className="p-2.5 rounded-xl hover:bg-zinc-100 text-zinc-700 transition-colors border border-zinc-200 cursor-pointer flex items-center justify-center shrink-0"
+                aria-label="Abrir menu de navegação"
+              >
+                <Menu className="w-5 h-5 text-zinc-800" />
+              </button>
 
-                {/* Logo Gestão Cursos Programa Certo: Apenas visual, ao clicar NÃO FAZ NADA */}
-                <div className="flex items-center gap-2.5 select-none cursor-default">
-                  <div className="w-9 h-9 flex items-center justify-center shrink-0">
-                    <img
-                      src={LOGO_PROGRAMA_CERTO_BASE64 || "/logo-programa-certo.png"}
-                      alt="Gestão Cursos Programa Certo"
-                      className="w-9 h-9 object-contain rounded-lg pointer-events-none drop-shadow-2xs"
-                    />
-                  </div>
-                  <div className="flex flex-col">
-                    <span className="font-display font-black text-base text-[#0b439c] leading-none">
-                      Gestão Cursos
-                    </span>
-                    <span className="font-display font-bold text-[10px] text-zinc-600 leading-none mt-0.5">
-                      Programa Certo
-                    </span>
-                  </div>
+              {/* Logo Gestão Cursos Programa Certo */}
+              <div className="flex items-center gap-2.5 select-none cursor-default">
+                <div className="w-9 h-9 flex items-center justify-center shrink-0">
+                  <img
+                    src={LOGO_PROGRAMA_CERTO_BASE64 || "/logo-programa-certo.png"}
+                    alt="Gestão Cursos Programa Certo"
+                    className="w-9 h-9 object-contain rounded-lg pointer-events-none drop-shadow-2xs"
+                  />
+                </div>
+                <div className="flex flex-col">
+                  <span className="font-display font-black text-base text-[#0b439c] leading-none">
+                    Gestão Cursos
+                  </span>
+                  <span className="font-display font-bold text-[10px] text-zinc-600 leading-none mt-0.5">
+                    Programa Certo
+                  </span>
                 </div>
               </div>
-            </header>
+            </div>
+          </header>
 
 
 
@@ -7031,8 +7499,8 @@ export default function App() {
                   className="p-5 bg-zinc-50 hover:bg-blue-50/50 border border-zinc-200 hover:border-blue-300 rounded-2xl transition-all text-left space-y-1.5 group cursor-pointer"
                 >
                   <BookOpen className="w-5 h-5 text-[#0b439c] group-hover:scale-110 transition-transform" />
-                  <h4 className="font-bold text-sm text-zinc-900">Gerenciar Cursos</h4>
-                  <p className="text-xs text-zinc-500">Gerencie o Programa Certo e os cursos do Programa Certo por aqui: catálogo, aulas e partes.</p>
+                  <h4 className="font-bold text-sm text-zinc-900">Gestão de Estudos</h4>
+                  <p className="text-xs text-zinc-500">Gerencie trilhas de estudo, cursos, aulas e partes das aulas da instituição.</p>
                 </button>
 
                 <button
@@ -8959,47 +9427,64 @@ export default function App() {
           </motion.div>
         )}
 
-        {/* ==================== TAB: GESTÃO DE CURSOS (ADMIN/INSTRUTOR) ==================== */}
+        {/* ==================== TAB: GESTÃO DE ESTUDOS (ADMIN/INSTRUTOR) ==================== */}
         {activeTab === "cursos_gestao" && (accountType === "administrador" || accountType === "instrutor") && (
           <motion.div 
             initial={{ opacity: 0, y: 15 }}
             animate={{ opacity: 1, y: 0 }}
             className="space-y-6"
           >
+            {/* Top Header */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
                 <h3 className="font-display font-black text-2xl text-zinc-900 tracking-tight flex items-center gap-2">
                   <BookOpen className="w-7 h-7 text-[#0b439c]" />
-                  Gestão e Cadastro de Cursos
+                  Gestão de Estudos
                 </h3>
                 <p className="text-sm text-zinc-500">
-                  Pesquise, crie novos cursos e gerencie o catálogo da plataforma.
+                  Gerencie trilhas de estudo, cursos, aulas e partes das aulas da instituição.
                 </p>
               </div>
-              <div className="flex items-center gap-3">
-                <div className="bg-white border border-zinc-200 px-4 py-2 rounded-xl text-xs font-bold text-zinc-600 shadow-sm flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
+              <div className="flex flex-wrap items-center gap-2.5">
+                <div className="bg-white border border-zinc-200 px-3.5 py-2 rounded-xl text-xs font-bold text-zinc-600 shadow-sm flex items-center gap-2">
+                  <span className="w-2.5 h-2.5 rounded-full bg-blue-600 animate-pulse" />
+                  <span>{trilhas.length} Trilhas</span>
+                </div>
+                <div className="bg-white border border-zinc-200 px-3.5 py-2 rounded-xl text-xs font-bold text-zinc-600 shadow-sm flex items-center gap-2">
+                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
                   <span>{courses.length} Cursos Cadastrados</span>
                 </div>
                 <button
-                  onClick={() => setIsCreateCourseModalOpen(true)}
-                  className="px-4 py-2 bg-[#0b439c] hover:bg-blue-800 text-white font-bold text-xs rounded-xl transition-all shadow-sm flex items-center gap-2 cursor-pointer"
+                  onClick={handleOpenCreateTrilha}
+                  className="px-4 py-2 bg-zinc-900 hover:bg-black text-white font-bold text-xs rounded-xl transition-all shadow-sm flex items-center gap-2 cursor-pointer"
+                  title="Criar uma nova Trilha de Estudo"
                 >
                   <Plus className="w-4 h-4" />
-                  <span>Criar Novo Curso</span>
+                  <span>Nova Trilha de Estudo</span>
+                </button>
+                <button
+                  onClick={() => {
+                    setNewCourseTrilhaId("");
+                    setIsCreateCourseModalOpen(true);
+                  }}
+                  className="px-4 py-2 bg-[#0b439c] hover:bg-blue-800 text-white font-bold text-xs rounded-xl transition-all shadow-sm flex items-center gap-2 cursor-pointer"
+                  title="Criar um novo Curso"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Novo Curso</span>
                 </button>
               </div>
             </div>
 
-            {/* Search & Filter Bar */}
-            <div className="bg-white border border-zinc-200 p-4 rounded-2xl shadow-sm flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+            {/* Search Bar */}
+            <div className="bg-white border border-zinc-200 p-4 rounded-2xl shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div className="relative flex-1 min-w-0">
                 <Search className="w-4 h-4 text-zinc-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                 <input
                   type="text"
                   value={adminCourseSearch}
                   onChange={(e) => setAdminCourseSearch(e.target.value)}
-                  placeholder="Pesquisar curso por título, descrição, categoria ou instrutor..."
+                  placeholder="Pesquisar por trilha, curso, categoria ou descrição..."
                   className="w-full bg-zinc-50 border border-zinc-200 rounded-xl pl-10 pr-9 py-2.5 text-xs text-zinc-900 focus:outline-none focus:border-blue-600 focus:bg-white transition-all shadow-2xs"
                 />
                 {adminCourseSearch && (
@@ -9012,268 +9497,299 @@ export default function App() {
                   </button>
                 )}
               </div>
-
-              <div className="flex flex-wrap items-center justify-between sm:justify-end gap-3 shrink-0">
-                <div className="flex items-center gap-1 bg-zinc-100 p-1 rounded-xl border border-zinc-200">
-                  <button
-                    onClick={() => setAdminCourseViewMode("table")}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                      adminCourseViewMode === "table"
-                        ? "bg-white text-[#0b439c] shadow-xs"
-                        : "text-zinc-500 hover:text-zinc-800"
-                    }`}
-                    title="Visão em Tabela"
-                  >
-                    <Table className="w-3.5 h-3.5" />
-                    <span className="hidden sm:inline">Tabela</span>
-                  </button>
-                  <button
-                    onClick={() => setAdminCourseViewMode("cards")}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                      adminCourseViewMode === "cards"
-                        ? "bg-white text-[#0b439c] shadow-xs"
-                        : "text-zinc-500 hover:text-zinc-800"
-                    }`}
-                    title="Visão em Cards"
-                  >
-                    <LayoutGrid className="w-3.5 h-3.5" />
-                    <span className="hidden sm:inline">Cards</span>
-                  </button>
-                </div>
-
-                <span className="text-xs text-zinc-400 font-medium shrink-0">
-                  Exibindo {courses.filter(c =>
-                    c.title.toLowerCase().includes(adminCourseSearch.toLowerCase()) ||
-                    c.category.toLowerCase().includes(adminCourseSearch.toLowerCase()) ||
-                    c.description.toLowerCase().includes(adminCourseSearch.toLowerCase()) ||
-                    (c.instructor && c.instructor.toLowerCase().includes(adminCourseSearch.toLowerCase()))
-                  ).length} de {courses.length} cursos
-                </span>
-              </div>
             </div>
 
-            {/* Courses Table / Cards List */}
-            {courses.filter(c =>
-              c.title.toLowerCase().includes(adminCourseSearch.toLowerCase()) ||
-              c.category.toLowerCase().includes(adminCourseSearch.toLowerCase()) ||
-              c.description.toLowerCase().includes(adminCourseSearch.toLowerCase()) ||
-              (c.instructor && c.instructor.toLowerCase().includes(adminCourseSearch.toLowerCase()))
-            ).length === 0 ? (
-              <div className="bg-white border border-zinc-200 rounded-2xl p-12 text-center space-y-3 shadow-sm">
-                <BookOpen className="w-12 h-12 text-zinc-300 mx-auto" />
-                <h4 className="font-bold text-zinc-700 text-base">Nenhum curso encontrado</h4>
-                <p className="text-xs text-zinc-400">Tente ajustar o termo de pesquisa ou cadastre um novo curso.</p>
-              </div>
-            ) : adminCourseViewMode === "table" ? (
-              <div className="bg-white border border-zinc-200 rounded-2xl overflow-hidden shadow-sm">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs">
-                    <thead className="bg-zinc-50 text-zinc-500 uppercase font-black tracking-wider border-b border-zinc-200">
-                      <tr>
-                        <th className="px-5 py-3.5">Curso</th>
-                        <th className="px-5 py-3.5">Categoria</th>
-                        <th className="px-5 py-3.5">Instrutor</th>
-                        <th className="px-5 py-3.5">Aulas / Carga</th>
-                        <th className="px-5 py-3.5">Visibilidade</th>
-                        <th className="px-5 py-3.5 text-right">Ações</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-zinc-100 font-medium text-zinc-800">
-                      {courses.filter(c =>
-                        c.title.toLowerCase().includes(adminCourseSearch.toLowerCase()) ||
-                        c.category.toLowerCase().includes(adminCourseSearch.toLowerCase()) ||
-                        c.description.toLowerCase().includes(adminCourseSearch.toLowerCase()) ||
-                        (c.instructor && c.instructor.toLowerCase().includes(adminCourseSearch.toLowerCase()))
-                      ).map((course) => (
-                        <tr key={course.id} className="hover:bg-zinc-50/80 transition-colors">
-                          <td className="px-5 py-4">
-                            <div className="flex items-center gap-3">
-                              <div 
-                                className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 shadow-xs"
-                                style={course.gradientColor ? {
-                                  background: course.gradientColor.includes(',') 
-                                    ? `linear-gradient(135deg, ${course.gradientColor.split(',')[0].trim()}, ${course.gradientColor.split(',')[1].trim()})`
-                                    : course.gradientColor
-                                } : { background: 'linear-gradient(135deg, #0b439c, #000084)' }}
-                              >
-                                <BookOpen className="w-5 h-5 text-white" />
-                              </div>
-                              <div>
-                                <div className="font-bold text-zinc-900 text-sm flex items-center gap-2">
-                                  {course.title}
-                                  {course.isCustom && (
-                                    <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded bg-yellow-400 text-zinc-950">
-                                      Novo
-                                    </span>
-                                  )}
-                                </div>
-                                <div className="text-zinc-500 text-xs line-clamp-1 max-w-xs">
-                                  {course.description}
-                                </div>
-                              </div>
-                            </div>
-                          </td>
-                          <td className="px-5 py-4">
-                            <span className="inline-block px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-blue-50 text-[#0b439c] border border-blue-100">
-                              {course.category}
-                            </span>
-                          </td>
-                          <td className="px-5 py-4 text-zinc-700">
-                            <span className="flex items-center gap-1.5 font-semibold">
-                              <User className="w-3.5 h-3.5 text-zinc-400" />
-                              {course.instructor || "Instrutor da Plataforma"}
-                            </span>
-                          </td>
-                          <td className="px-5 py-4 text-zinc-600">
-                            <span className="flex items-center gap-1.5 font-semibold">
-                              <BookOpen className="w-3.5 h-3.5 text-zinc-400" />
-                              {course.modules?.length || 1} Aula(s) / Texto
-                            </span>
-                          </td>
-                          <td className="px-5 py-4">
-                            <span className={`inline-block px-2.5 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider ${
-                              course.visibility === 'Privado' ? 'bg-zinc-100 text-zinc-600' :
-                              course.visibility === 'Rascunho' ? 'bg-amber-50 text-amber-700 border border-amber-200' :
-                              'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                            }`}>
-                              {course.visibility || "Público"}
-                            </span>
-                          </td>
-                          <td className="px-5 py-4 text-right">
-                            <div className="flex items-center justify-end gap-2">
-                              <button
-                                onClick={() => handleOpenCourseInfo(course, "cursos_gestao")}
-                                className="px-3.5 py-1.5 bg-[#0b439c] hover:bg-blue-800 text-white text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 cursor-pointer shadow-xs"
-                                title="Ver Dados do Curso"
-                              >
-                                <Eye className="w-3.5 h-3.5 text-white" />
-                                <span>Ver Dados</span>
-                              </button>
-                              <button
-                                onClick={() => handleOpenEditCourse(course)}
-                                className="p-1.5 text-zinc-500 hover:text-[#0b439c] hover:bg-blue-50 rounded-lg transition-all cursor-pointer"
-                                title="Editar Informações do Curso"
-                              >
-                                <Edit3 className="w-4 h-4" />
-                              </button>
-                              <button
-                                onClick={() => handleRemoveCourse(course.id)}
-                                className="p-1.5 text-zinc-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all cursor-pointer"
-                                title="Excluir Curso"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {courses.filter(c =>
-                  c.title.toLowerCase().includes(adminCourseSearch.toLowerCase()) ||
-                  c.category.toLowerCase().includes(adminCourseSearch.toLowerCase()) ||
-                  c.description.toLowerCase().includes(adminCourseSearch.toLowerCase()) ||
-                  (c.instructor && c.instructor.toLowerCase().includes(adminCourseSearch.toLowerCase()))
-                ).map((course) => (
-                  <div key={course.id} className="bg-white border border-zinc-200 rounded-2xl overflow-hidden shadow-sm flex flex-col justify-between hover:border-blue-300 transition-all group">
-                    <div>
-                      {/* Course Gradient Header */}
-                      <div 
-                        style={course.gradientColor ? {
-                          background: course.gradientColor.includes(',') 
-                            ? `linear-gradient(135deg, ${course.gradientColor.split(',')[0].trim()}, ${course.gradientColor.split(',')[1].trim()})`
-                            : course.gradientColor
-                        } : undefined}
-                        className={`p-5 min-h-[110px] flex flex-col justify-between ${
-                          course.gradientColor ? 'text-white shadow-xs' :
-                          course.category === 'Back-end' ? 'bg-gradient-to-r from-emerald-800 to-emerald-950 text-white' :
-                          course.category === 'Front-end' ? 'bg-gradient-to-r from-blue-800 to-indigo-950 text-white' :
-                          course.category === 'Data Science' ? 'bg-gradient-to-r from-purple-800 to-purple-950 text-white' :
-                          course.category === 'Scripts & DevOps' ? 'bg-gradient-to-r from-amber-700 to-amber-950 text-white' :
-                          course.category === 'Automação' ? 'bg-gradient-to-r from-indigo-800 to-indigo-950 text-white' :
-                          'bg-gradient-to-r from-[#0b439c] to-slate-950 text-white'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between gap-2 mb-2">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="text-[10px] font-black uppercase tracking-wider bg-white/20 text-white backdrop-blur-xs px-2.5 py-1 rounded-full">
-                              {course.category}
-                            </span>
-                            {course.visibility && (
-                              <span className="text-[10px] font-black uppercase tracking-wider bg-black/30 text-white px-2.5 py-1 rounded-full">
-                                {course.visibility}
-                              </span>
-                            )}
-                            {course.isCustom && (
-                              <span className="flex items-center gap-1 text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded bg-yellow-400 text-zinc-950">
-                                <Sparkles className="w-2.5 h-2.5 fill-current" />
-                                Novo
-                              </span>
-                            )}
-                          </div>
-                          <div className="w-8 h-8 rounded-lg bg-white/10 backdrop-blur-xs flex items-center justify-center shrink-0">
-                            <BookOpen className="w-4 h-4 text-white" />
-                          </div>
-                        </div>
-                        <h4 className="font-display font-black text-white text-lg leading-tight line-clamp-2">
-                          {course.title}
-                        </h4>
-                      </div>
+            {/* List of Trilhas and their Courses */}
+            {(() => {
+              const term = adminCourseSearch.toLowerCase().trim();
 
-                      {/* Body */}
-                      <div className="p-5 space-y-3">
-                        <p className="text-xs text-zinc-500 line-clamp-2 leading-relaxed">
-                          {course.description}
-                        </p>
+              const filteredTrilhas = trilhas.filter(trilha => {
+                if (!term) return true;
+                const matchesTrilha = trilha.nome_da_trilha.toLowerCase().includes(term) ||
+                  (trilha.descricao && trilha.descricao.toLowerCase().includes(term));
+                const coursesInTrilha = courses.filter(c => Number(c.id_trilha) === Number(trilha.id));
+                const matchesAnyCourse = coursesInTrilha.some(c =>
+                  c.title.toLowerCase().includes(term) ||
+                  c.category.toLowerCase().includes(term) ||
+                  c.description.toLowerCase().includes(term)
+                );
+                return matchesTrilha || matchesAnyCourse;
+              });
 
-                        <div className="flex items-center gap-4 text-xs text-zinc-400 font-medium pt-2 border-t border-zinc-100">
-                          <span className="flex items-center gap-1">
-                            <User className="w-3.5 h-3.5 text-zinc-500" />
-                            {course.instructor || "Instrutor da Plataforma"}
-                          </span>
-                          <span className="flex items-center gap-1">
-                            <BookOpen className="w-3.5 h-3.5 text-zinc-500" />
-                            {course.modules?.length || 1} Aula(s)
-                          </span>
-                        </div>
-                      </div>
-                    </div>
+              const orphanedCourses = courses.filter(c => {
+                const hasValidTrilha = trilhas.some(t => Number(t.id) === Number(c.id_trilha));
+                if (hasValidTrilha) return false;
+                if (!term) return true;
+                return (
+                  c.title.toLowerCase().includes(term) ||
+                  c.category.toLowerCase().includes(term) ||
+                  c.description.toLowerCase().includes(term)
+                );
+              });
 
-                    {/* Footer Actions */}
-                    <div className="p-4 bg-zinc-50 border-t border-zinc-100 flex items-center justify-between gap-2">
+              if (filteredTrilhas.length === 0 && orphanedCourses.length === 0) {
+                return (
+                  <div className="bg-white border border-zinc-200 rounded-2xl p-12 text-center space-y-4 shadow-sm">
+                    <BookOpen className="w-12 h-12 text-zinc-300 mx-auto" />
+                    <h4 className="font-bold text-zinc-800 text-base">Nenhuma trilha ou curso encontrado</h4>
+                    <p className="text-xs text-zinc-500 max-w-md mx-auto">
+                      Tente ajustar sua busca ou crie uma nova trilha de estudo para começar a organizar seus cursos.
+                    </p>
+                    <div className="flex items-center justify-center gap-3 pt-2">
                       <button
-                        onClick={() => handleOpenCourseInfo(course, "cursos_gestao")}
-                        className="px-4 py-2 bg-[#0b439c] hover:bg-blue-800 text-white text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shadow-xs"
+                        onClick={handleOpenCreateTrilha}
+                        className="px-4 py-2 bg-zinc-900 hover:bg-black text-white font-bold text-xs rounded-xl transition-all shadow-sm flex items-center gap-2 cursor-pointer"
                       >
-                        <Eye className="w-3.5 h-3.5 text-white" />
-                        <span>Ver Dados</span>
+                        <Plus className="w-4 h-4" />
+                        <span>Criar Nova Trilha</span>
                       </button>
-
-                      <div className="flex items-center gap-1">
-                        <button
-                          onClick={() => handleOpenEditCourse(course)}
-                          className="p-2 text-zinc-500 hover:text-[#0b439c] hover:bg-blue-50 rounded-xl transition-all cursor-pointer"
-                          title="Editar Informações do Curso"
-                        >
-                          <Edit3 className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => handleRemoveCourse(course.id)}
-                          className="p-2 text-zinc-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-all cursor-pointer"
-                          title="Excluir Curso"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
                     </div>
                   </div>
-                ))}
-              </div>
-            )}
+                );
+              }
+
+              return (
+                <div className="space-y-8">
+                  {/* Trilhas Section */}
+                  {filteredTrilhas.map((trilha) => {
+                    const coursesInTrilha = courses.filter(c => Number(c.id_trilha) === Number(trilha.id));
+                    const visibleCourses = term 
+                      ? coursesInTrilha.filter(c =>
+                          c.title.toLowerCase().includes(term) ||
+                          c.category.toLowerCase().includes(term) ||
+                          c.description.toLowerCase().includes(term)
+                        )
+                      : coursesInTrilha;
+
+                    const totalAulasInTrilha = coursesInTrilha.reduce((acc, c) => acc + (c.modules?.length || 0), 0);
+                    const totalPartesInTrilha = coursesInTrilha.reduce((acc, c) => 
+                      acc + (c.modules?.reduce((mAcc, m) => mAcc + (m.lessons?.length || 0), 0) || 0), 0
+                    );
+
+                    return (
+                      <div 
+                        key={trilha.id} 
+                        className="bg-white border border-zinc-200 rounded-2xl overflow-hidden shadow-sm hover:border-zinc-300 transition-all space-y-4 p-5 sm:p-6"
+                      >
+                        {/* Trilha Header */}
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-zinc-100 pb-4">
+                          <div className="space-y-1.5 flex-1 min-w-0">
+                            <div className="flex items-center gap-3 flex-wrap">
+                              <span className="w-2.5 h-2.5 rounded-full bg-[#0b439c]" />
+                              <h4 className="font-display font-black text-xl text-zinc-900 tracking-tight">
+                                {trilha.nome_da_trilha}
+                              </h4>
+                              <div className="flex items-center gap-2 text-xs text-zinc-500 font-medium">
+                                <span>{coursesInTrilha.length} {coursesInTrilha.length === 1 ? "Curso" : "Cursos"}</span>
+                                <span aria-hidden="true">·</span>
+                                <span>{totalAulasInTrilha} {totalAulasInTrilha === 1 ? "Aula" : "Aulas"}</span>
+                                <span aria-hidden="true">·</span>
+                                <span>{totalPartesInTrilha} {totalPartesInTrilha === 1 ? "Parte" : "Partes"}</span>
+                              </div>
+                            </div>
+                            {trilha.descricao && (
+                              <p className="text-xs text-zinc-500 line-clamp-2 leading-relaxed">
+                                {trilha.descricao}
+                              </p>
+                            )}
+                          </div>
+
+                          {/* Trilha Actions */}
+                          <div className="flex items-center gap-2 shrink-0">
+                            <button
+                              onClick={() => {
+                                setNewCourseTrilhaId(String(trilha.id));
+                                setIsCreateCourseModalOpen(true);
+                              }}
+                              className="px-3.5 py-1.5 bg-blue-50 hover:bg-blue-100 text-[#0b439c] font-bold text-xs rounded-xl transition-all cursor-pointer flex items-center gap-1.5 border border-blue-200"
+                              title="Adicionar curso nesta trilha"
+                            >
+                              <Plus className="w-3.5 h-3.5" />
+                              <span>Adicionar Curso</span>
+                            </button>
+                            <button
+                              onClick={() => handleOpenEditTrilha(trilha)}
+                              className="px-3 py-1.5 bg-zinc-100 hover:bg-zinc-200 text-zinc-700 font-bold text-xs rounded-xl transition-all cursor-pointer flex items-center gap-1.5 border border-zinc-200"
+                              title="Ver dados e editar informações da trilha"
+                            >
+                              <Edit3 className="w-3.5 h-3.5 text-zinc-600" />
+                              <span>Ver Dados</span>
+                            </button>
+                            <button
+                              onClick={() => handleRequestDeleteTrilha(trilha)}
+                              className="p-2 text-zinc-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-all cursor-pointer border border-transparent hover:border-red-200"
+                              title="Excluir trilha (exclusão em cascata)"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Courses inside this Trilha */}
+                        {visibleCourses.length === 0 ? (
+                          <div className="p-6 bg-zinc-50 rounded-xl border border-dashed border-zinc-200 text-center space-y-2">
+                            <p className="text-xs text-zinc-500 font-medium">Nenhum curso cadastrado nesta trilha ainda.</p>
+                            <button
+                              onClick={() => {
+                                setNewCourseTrilhaId(String(trilha.id));
+                                setIsCreateCourseModalOpen(true);
+                              }}
+                              className="inline-flex items-center gap-1.5 text-xs font-bold text-[#0b439c] hover:underline cursor-pointer"
+                            >
+                              <Plus className="w-3.5 h-3.5" />
+                              <span>Cadastrar o primeiro curso desta trilha</span>
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 pt-1">
+                            {visibleCourses.map((course) => {
+                              const totalPartesNoCurso = course.modules?.reduce((acc, m) => acc + (m.lessons?.length || 0), 0) || 0;
+                              return (
+                                <div 
+                                  key={course.id} 
+                                  className="bg-zinc-50/70 border border-zinc-200 rounded-xl p-4 flex flex-col justify-between hover:bg-white hover:border-blue-300 transition-all shadow-2xs group"
+                                >
+                                  <div className="space-y-2.5">
+                                    <div className="flex items-center justify-between gap-2">
+                                      <span className="text-[10px] font-black uppercase tracking-wider bg-blue-50 text-[#0b439c] border border-blue-100 px-2 py-0.5 rounded">
+                                        {course.category}
+                                      </span>
+                                      <div className="flex items-center gap-1.5 text-[11px] text-zinc-500 font-semibold">
+                                        <BookOpen className="w-3.5 h-3.5 text-zinc-400" />
+                                        <span>{course.modules?.length || 0} Aulas · {totalPartesNoCurso} Partes</span>
+                                      </div>
+                                    </div>
+
+                                    <div>
+                                      <h5 className="font-bold text-zinc-900 text-sm line-clamp-1 group-hover:text-[#0b439c] transition-colors">
+                                        {course.title}
+                                      </h5>
+                                      <p className="text-xs text-zinc-500 line-clamp-2 mt-1 leading-relaxed">
+                                        {course.description}
+                                      </p>
+                                    </div>
+                                  </div>
+
+                                  {/* Course Actions */}
+                                  <div className="pt-3.5 mt-3 border-t border-zinc-200/70 flex items-center justify-between gap-2">
+                                    <button
+                                      onClick={() => handleOpenCourseInfo(course, "cursos_gestao")}
+                                      className="px-3 py-1.5 bg-[#0b439c] hover:bg-blue-800 text-white font-bold text-xs rounded-lg transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs"
+                                      title="Ver dados e estrutura do curso"
+                                    >
+                                      <Eye className="w-3.5 h-3.5" />
+                                      <span>Ver Dados</span>
+                                    </button>
+
+                                    <div className="flex items-center gap-1">
+                                      <button
+                                        onClick={() => handleOpenEditCourse(course)}
+                                        className="p-1.5 text-zinc-500 hover:text-[#0b439c] hover:bg-white rounded-lg transition-all cursor-pointer border border-transparent hover:border-zinc-200"
+                                        title="Editar Informações do Curso"
+                                      >
+                                        <Edit3 className="w-3.5 h-3.5" />
+                                      </button>
+                                      <button
+                                        onClick={() => handleRemoveCourse(course.id)}
+                                        className="p-1.5 text-zinc-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all cursor-pointer border border-transparent hover:border-red-200"
+                                        title="Excluir Curso"
+                                      >
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                      </button>
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+
+                  {/* Orphaned Courses (Cursos sem Trilha Definida) */}
+                  {orphanedCourses.length > 0 && (
+                    <div className="bg-white border border-amber-200 rounded-2xl overflow-hidden shadow-sm space-y-4 p-5 sm:p-6">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-amber-100 pb-4">
+                        <div className="space-y-1">
+                          <h4 className="font-display font-black text-lg text-zinc-900 tracking-tight flex items-center gap-2">
+                            <span className="w-2.5 h-2.5 rounded-full bg-amber-500" />
+                            Outros Cursos (Sem Trilha Definida)
+                          </h4>
+                          <p className="text-xs text-zinc-500">
+                            Cursos disponíveis que ainda não foram vinculados a nenhuma trilha de estudo. Você pode editar os dados do curso para vinculá-lo a uma trilha.
+                          </p>
+                        </div>
+                        <div className="text-xs font-bold text-amber-700 bg-amber-50 px-3 py-1.5 rounded-xl border border-amber-200 shrink-0">
+                          {orphanedCourses.length} {orphanedCourses.length === 1 ? "Curso" : "Cursos"}
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        {orphanedCourses.map((course) => {
+                          const totalPartesNoCurso = course.modules?.reduce((acc, m) => acc + (m.lessons?.length || 0), 0) || 0;
+                          return (
+                            <div 
+                              key={course.id} 
+                              className="bg-zinc-50/70 border border-zinc-200 rounded-xl p-4 flex flex-col justify-between hover:bg-white hover:border-blue-300 transition-all shadow-2xs group"
+                            >
+                              <div className="space-y-2.5">
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="text-[10px] font-black uppercase tracking-wider bg-blue-50 text-[#0b439c] border border-blue-100 px-2 py-0.5 rounded">
+                                    {course.category}
+                                  </span>
+                                  <div className="flex items-center gap-1.5 text-[11px] text-zinc-500 font-semibold">
+                                    <BookOpen className="w-3.5 h-3.5 text-zinc-400" />
+                                    <span>{course.modules?.length || 0} Aulas · {totalPartesNoCurso} Partes</span>
+                                  </div>
+                                </div>
+
+                                <div>
+                                  <h5 className="font-bold text-zinc-900 text-sm line-clamp-1 group-hover:text-[#0b439c] transition-colors">
+                                    {course.title}
+                                  </h5>
+                                  <p className="text-xs text-zinc-500 line-clamp-2 mt-1 leading-relaxed">
+                                    {course.description}
+                                  </p>
+                                </div>
+                              </div>
+
+                              <div className="pt-3.5 mt-3 border-t border-zinc-200/70 flex items-center justify-between gap-2">
+                                <button
+                                  onClick={() => handleOpenCourseInfo(course, "cursos_gestao")}
+                                  className="px-3 py-1.5 bg-[#0b439c] hover:bg-blue-800 text-white font-bold text-xs rounded-lg transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs"
+                                  title="Ver dados e estrutura do curso"
+                                >
+                                  <Eye className="w-3.5 h-3.5" />
+                                  <span>Ver Dados</span>
+                                </button>
+
+                                <div className="flex items-center gap-1">
+                                  <button
+                                    onClick={() => handleOpenEditCourse(course)}
+                                    className="p-1.5 text-zinc-500 hover:text-[#0b439c] hover:bg-white rounded-lg transition-all cursor-pointer border border-transparent hover:border-zinc-200"
+                                    title="Vincular a uma Trilha / Editar Curso"
+                                  >
+                                    <Edit3 className="w-3.5 h-3.5" />
+                                  </button>
+                                  <button
+                                    onClick={() => handleRemoveCourse(course.id)}
+                                    className="p-1.5 text-zinc-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all cursor-pointer border border-transparent hover:border-red-200"
+                                    title="Excluir Curso"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
           </motion.div>
         )}
 
@@ -9309,40 +9825,31 @@ export default function App() {
                 </button>
               </div>
 
-              {/* Course Header Banner with Welcome & Chips */}
-              <div
-                style={selectedCourse.gradientColor ? {
-                  background: selectedCourse.gradientColor.includes(',') 
-                    ? `linear-gradient(135deg, ${selectedCourse.gradientColor.split(',')[0].trim()}, ${selectedCourse.gradientColor.split(',')[1].trim()})`
-                    : selectedCourse.gradientColor
-                } : undefined}
-                className={`p-6 md:p-8 rounded-2xl shadow-sm space-y-3 ${
-                  selectedCourse.gradientColor ? 'text-white' : 'bg-gradient-to-r from-[#0b439c] to-indigo-900 text-white'
-                }`}
-              >
+              {/* Course Header Card (100% Light Mode) */}
+              <div className="bg-white border border-zinc-200 rounded-2xl p-6 md:p-8 shadow-xs space-y-3.5">
                 {/* Welcome Greeting */}
-                <div className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full bg-white/20 backdrop-blur-md border border-white/20 text-white text-xs font-bold shadow-2xs">
-                  <span>Seja bem-vindo(a) ao curso!</span>
+                <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-50 border border-blue-200 text-[#0b439c] text-xs font-bold shadow-2xs">
+                  <span>Gestão do Curso</span>
                 </div>
 
                 {/* Course Title */}
-                <h2 className="font-display font-black text-2xl md:text-3xl tracking-tight text-white leading-tight">
+                <h2 className="font-display font-black text-2xl md:text-3xl tracking-tight text-zinc-900 leading-tight">
                   {selectedCourse.title}
                 </h2>
 
                 {/* Chips (Chipolines / Badges) */}
                 <div className="flex items-center gap-2 flex-wrap pt-1">
-                  <span className="text-[11px] font-black uppercase tracking-wider px-3 py-1 rounded-full bg-white/20 text-white backdrop-blur-xs border border-white/20 flex items-center gap-1.5">
-                    <BookOpen className="w-3 h-3" />
+                  <span className="text-[11px] font-black uppercase tracking-wider px-3 py-1 rounded-lg bg-blue-50 text-[#0b439c] border border-blue-200 flex items-center gap-1.5 font-sans">
+                    <BookOpen className="w-3.5 h-3.5 text-[#0b439c]" />
                     {selectedCourse.category}
                   </span>
-                  <span className="text-[11px] font-black uppercase tracking-wider px-3 py-1 rounded-full bg-white/20 text-white backdrop-blur-xs border border-white/20 flex items-center gap-1.5">
-                    <Layers className="w-3 h-3" />
+                  <span className="text-[11px] font-black uppercase tracking-wider px-3 py-1 rounded-lg bg-zinc-100 text-zinc-700 border border-zinc-200 flex items-center gap-1.5 font-sans">
+                    <Layers className="w-3.5 h-3.5 text-zinc-500" />
                     {selectedCourse.modules?.length || 0} Aulas • {selectedCourse.modules?.reduce((acc, m) => acc + (m.lessons?.length || 0), 0) || 0} Partes
                   </span>
                   {(courseInfoSourceTab === "cursos_gestao" || accountType === "administrador" || accountType === "instrutor") && (
-                    <span className="text-[11px] font-black uppercase tracking-wider px-3 py-1 rounded-full bg-amber-500/30 text-amber-100 border border-amber-400/30">
-                      Modo Gestão / Edição
+                    <span className="text-[11px] font-black uppercase tracking-wider px-3 py-1 rounded-lg bg-emerald-50 text-emerald-800 border border-emerald-200 font-sans">
+                      Painel de Gestão
                     </span>
                   )}
                 </div>
@@ -9414,7 +9921,7 @@ export default function App() {
               {/* Details & Grade Sections Grid */}
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
                 
-                {/* Left side: Description & Instructor Profile & Progress (4 cols on lg) */}
+                {/* Left side: Description & Ficha Técnica / Progress (4 cols on lg) */}
                 <div className="lg:col-span-4 space-y-6">
                   {/* Course Description */}
                   <div className="bg-white border border-zinc-200 rounded-2xl p-5 shadow-xs space-y-3">
@@ -9427,51 +9934,19 @@ export default function App() {
                     </p>
                   </div>
 
-                  {/* Instructor Section (Right after Description) */}
-                  {(() => {
-                    const instructorName = selectedCourse.instructor || "Instrutor da Plataforma";
-                    const instructorUser = allUsers.find(
-                      (u) => u.name && u.name.toLowerCase().trim() === instructorName.toLowerCase().trim()
-                    );
-                    const avatarUrl =
-                      instructorPhotoUrl ||
-                      `https://ui-avatars.com/api/?name=${encodeURIComponent(instructorName)}&background=0b439c&color=fff&bold=true`;
-
-                    return (
-                      <div className="bg-white border border-zinc-200 rounded-2xl p-5 shadow-xs space-y-3">
-                        <h4 className="font-display font-bold text-sm text-zinc-900 uppercase tracking-wider flex items-center gap-2 border-b border-zinc-100 pb-2">
-                          <UserCheck className="w-4 h-4 text-[#0b439c]" />
-                          Instrutor do Curso
-                        </h4>
-
-                        <div className="flex items-center gap-3">
-                          <img
-                            src={avatarUrl}
-                            alt={instructorName}
-                            className="w-12 h-12 rounded-full object-cover border-2 border-[#0b439c]/20 shadow-xs shrink-0"
-                            onError={(e) => {
-                              (e.target as HTMLImageElement).src = `https://ui-avatars.com/api/?name=${encodeURIComponent(instructorName)}&background=0b439c&color=fff&bold=true`;
-                            }}
-                          />
-                          <div>
-                            <h5 className="font-bold text-base text-zinc-900 leading-tight">{instructorName}</h5>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })()}
-
                   {courseInfoSourceTab === "cursos_gestao" || accountType === "administrador" || accountType === "instrutor" ? (
-                    /* Admin/Instructor Specs Box */
+                    /* Admin Specs Box (NO INSTRUTOR) */
                     <div className="bg-white border border-zinc-200 rounded-2xl p-5 shadow-xs space-y-3">
                       <h4 className="font-display font-bold text-sm text-zinc-900 uppercase tracking-wider flex items-center gap-2 border-b border-zinc-100 pb-2">
                         <BookOpen className="w-4 h-4 text-[#0b439c]" />
-                        Ficha Técnica de Gestão
+                        Ficha Técnica do Curso
                       </h4>
                       <div className="space-y-2 text-xs">
                         <div className="flex justify-between py-1 border-b border-zinc-50">
-                          <span className="text-zinc-500 font-medium">Instrutor Responsável:</span>
-                          <span className="font-bold text-zinc-800">{selectedCourse.instructor || "Instrutor da Plataforma"}</span>
+                          <span className="text-zinc-500 font-medium">Trilha de Estudo:</span>
+                          <span className="font-bold text-zinc-800">
+                            {trilhas.find(t => Number(t.id) === Number(selectedCourse.id_trilha))?.nome_da_trilha || "Sem trilha vinculada"}
+                          </span>
                         </div>
                         <div className="flex justify-between py-1 border-b border-zinc-50">
                           <span className="text-zinc-500 font-medium">Categoria:</span>
@@ -9529,12 +10004,18 @@ export default function App() {
                 {/* Right side: Aulas & Partes Management (8 cols on lg) */}
                 <div className="lg:col-span-8 space-y-4">
                   <div className="bg-white border border-zinc-200 rounded-2xl overflow-hidden shadow-xs">
-                    <div className="p-4 bg-zinc-50 border-b border-zinc-200 flex items-center justify-between">
-                      <h4 className="font-display font-bold text-sm text-zinc-900 uppercase tracking-wider flex items-center gap-2">
-                        <Layers className="w-4 h-4 text-[#0b439c]" />
-                        Estrutura de Aulas e Partes
-                      </h4>
-                      {(courseInfoSourceTab === "cursos_gestao" || accountType === "administrador" || accountType === "instrutor") ? (
+                    {/* Header */}
+                    <div className="p-4 bg-zinc-50 border-b border-zinc-200 flex items-center justify-between gap-3">
+                      <div>
+                        <h4 className="font-display font-bold text-sm text-zinc-900 uppercase tracking-wider flex items-center gap-2">
+                          <Layers className="w-4 h-4 text-[#0b439c]" />
+                          Estrutura de Aulas e Partes
+                        </h4>
+                        <p className="text-[11px] text-zinc-500 mt-0.5">
+                          Arraste pelo tracinho ou use as setas para reordenar aulas e partes.
+                        </p>
+                      </div>
+                      {(courseInfoSourceTab === "cursos_gestao" || accountType === "administrador" || accountType === "instrutor") && (
                         <button
                           onClick={() => {
                             setModuleLessonCourse(selectedCourse);
@@ -9544,120 +10025,335 @@ export default function App() {
                             setAddLessonContent("");
                             setSelectedTargetModuleIndex(0);
                           }}
-                          className="px-3 py-1.5 bg-[#0b439c] hover:bg-blue-800 text-white font-bold text-xs rounded-lg transition-all cursor-pointer flex items-center gap-1.5 shadow-xs"
+                          className="px-3.5 py-1.5 bg-[#0b439c] hover:bg-blue-800 text-white font-bold text-xs rounded-lg transition-all cursor-pointer flex items-center gap-1.5 shadow-xs shrink-0"
                         >
                           <Plus className="w-3.5 h-3.5" />
-                          Nova Aula
+                          <span>Nova Aula</span>
                         </button>
-                      ) : (
-                        <span className="text-xs text-zinc-500 font-semibold">
-                          {selectedCourse.modules?.length || 0} {selectedCourse.modules?.length === 1 ? "Aula" : "Aulas"}
-                        </span>
                       )}
                     </div>
 
+                    {/* Aulas List */}
                     <div className="divide-y divide-zinc-200">
-                      {selectedCourse.modules?.map((module, mIdx) => (
-                        <div key={mIdx} className="p-4 space-y-3">
-                          <div className="flex items-center justify-between flex-wrap gap-2">
-                            <h5 className="font-bold text-xs text-zinc-800 uppercase tracking-wide flex items-center gap-2">
-                              <span className="w-5 h-5 rounded bg-blue-50 text-[#0b439c] border border-blue-100 flex items-center justify-center font-black text-[10px]">
-                                {mIdx + 1}
-                              </span>
-                              {module.title}
-                            </h5>
-                            
-                            {(courseInfoSourceTab === "cursos_gestao" || accountType === "administrador" || accountType === "instrutor") ? (
-                              <button
-                                onClick={() => {
-                                  setModuleLessonCourse(selectedCourse);
-                                  setAddType("lesson");
-                                  setAddModuleTitle("");
-                                  setAddLessonTitle("");
-                                  setAddLessonContent("");
-                                  setSelectedTargetModuleIndex(mIdx);
-                                }}
-                                className="px-2.5 py-1 bg-zinc-100 hover:bg-blue-50 text-zinc-700 hover:text-[#0b439c] font-bold text-[11px] rounded-lg transition-all cursor-pointer flex items-center gap-1 border border-zinc-200"
-                              >
-                                <Plus className="w-3 h-3" />
-                                Adicionar Parte
-                              </button>
-                            ) : (
-                              <span className="text-[11px] text-zinc-400 font-medium">
-                                {module.lessons?.length || 0} {module.lessons?.length === 1 ? "Parte" : "Partes"}
-                              </span>
-                            )}
-                          </div>
-
-                          <div className="space-y-1.5 pl-2">
-                            {module.lessons?.map((lesson, lIdx) => {
-                              const isCompleted = isLessonCompleted(selectedCourse.id, mIdx, lIdx);
-                              return (
-                                <div
-                                  key={lIdx}
-                                  className="p-3 bg-zinc-50 border border-zinc-150 rounded-xl flex items-center justify-between gap-3 transition-all group"
-                                >
-                                  <div className="flex items-center gap-3 min-w-0 flex-1">
-                                    {(courseInfoSourceTab === "cursos_gestao" || accountType === "administrador" || accountType === "instrutor") ? (
-                                      <BookOpen className="w-4 h-4 text-[#0b439c] shrink-0" />
-                                    ) : isCompleted ? (
-                                      <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                                    ) : (
-                                      <Play className="w-4 h-4 text-zinc-400 group-hover:text-[#0b439c] shrink-0" />
-                                    )}
-                                    <div className="min-w-0 flex-1">
-                                      <p className="text-xs font-semibold text-zinc-800 truncate">
-                                        Parte {lIdx + 1}: {lesson.title}
-                                      </p>
-                                    </div>
-                                  </div>
-
-                                  <div className="flex items-center gap-2 shrink-0">
-                                    {(courseInfoSourceTab === "cursos_gestao" || accountType === "administrador" || accountType === "instrutor") ? (
-                                      <div className="flex items-center gap-1.5">
-                                        <button
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            setEditingLesson({
-                                              courseId: selectedCourse.id,
-                                              moduleIndex: mIdx,
-                                              lessonIndex: lIdx,
-                                              title: lesson.title,
-                                              content: lesson.content || ""
-                                            });
-                                          }}
-                                          className="px-2.5 py-1 bg-white hover:bg-zinc-100 text-zinc-700 font-bold text-[11px] rounded-lg border border-zinc-200 transition-all cursor-pointer flex items-center gap-1 shadow-2xs"
-                                        >
-                                          <Edit3 className="w-3 h-3 text-zinc-500" />
-                                          Editar
-                                        </button>
-                                        <button
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            handleDeleteLesson(selectedCourse.id, mIdx, lIdx);
-                                          }}
-                                          className="px-2.5 py-1 bg-red-50 hover:bg-red-100 text-red-600 font-bold text-[11px] rounded-lg border border-red-200 transition-all cursor-pointer flex items-center gap-1"
-                                        >
-                                          <Trash2 className="w-3 h-3" />
-                                          Excluir
-                                        </button>
-                                      </div>
-                                    ) : (
-                                      <button
-                                        onClick={() => handleSelectLesson(selectedCourse, mIdx, lIdx)}
-                                        className="text-xs font-bold text-[#0b439c] hover:underline flex items-center gap-1 cursor-pointer"
-                                      >
-                                        Ver Aula <ChevronRight className="w-3.5 h-3.5" />
-                                      </button>
-                                    )}
-                                  </div>
-                                </div>
-                              );
-                            })}
-                          </div>
+                      {(!selectedCourse.modules || selectedCourse.modules.length === 0) ? (
+                        <div className="p-8 text-center space-y-3">
+                          <Layers className="w-8 h-8 text-zinc-300 mx-auto" />
+                          <p className="text-xs text-zinc-500">Nenhuma aula cadastrada neste curso ainda.</p>
+                          <button
+                            onClick={() => {
+                              setModuleLessonCourse(selectedCourse);
+                              setAddType("module");
+                              setAddModuleTitle("");
+                              setAddLessonTitle("");
+                              setAddLessonContent("");
+                              setSelectedTargetModuleIndex(0);
+                            }}
+                            className="px-4 py-2 bg-[#0b439c] text-white font-bold text-xs rounded-xl inline-flex items-center gap-1.5"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                            <span>Criar Aula 1</span>
+                          </button>
                         </div>
-                      ))}
+                      ) : (
+                        selectedCourse.modules.map((module, mIdx) => {
+                          const isCollapsed = Boolean(collapsedAulas[mIdx]);
+                          const isFirstAula = mIdx === 0;
+                          const isLastAula = mIdx === selectedCourse.modules.length - 1;
+
+                          return (
+                            <div 
+                              key={mIdx} 
+                              className="p-4 space-y-3 transition-colors hover:bg-zinc-50/50"
+                              onDragOver={(e) => {
+                                e.preventDefault();
+                              }}
+                              onDrop={(e) => {
+                                e.preventDefault();
+                                const sourceIdxStr = e.dataTransfer.getData("text/aula-index");
+                                if (sourceIdxStr !== "") {
+                                  const sourceIdx = parseInt(sourceIdxStr, 10);
+                                  if (!isNaN(sourceIdx) && sourceIdx !== mIdx) {
+                                    handleMoveAula(selectedCourse.id, sourceIdx, mIdx);
+                                  }
+                                }
+                              }}
+                            >
+                              {/* Aula Header Row */}
+                              <div className="flex items-center justify-between flex-wrap gap-2">
+                                <div className="flex items-center gap-2 min-w-0 flex-1">
+                                  {/* Drag handle ("tracinho") & Up/Down Arrows */}
+                                  {(courseInfoSourceTab === "cursos_gestao" || accountType === "administrador" || accountType === "instrutor") && (
+                                    <div className="flex items-center gap-0.5 shrink-0 bg-zinc-100 p-0.5 rounded-lg border border-zinc-200">
+                                      <div
+                                        draggable={true}
+                                        onDragStart={(e) => {
+                                          e.dataTransfer.setData("text/aula-index", String(mIdx));
+                                        }}
+                                        className="cursor-grab active:cursor-grabbing p-1 text-zinc-400 hover:text-zinc-700 rounded transition-colors"
+                                        title="Arraste para mover toda a aula com suas partes"
+                                      >
+                                        <GripVertical className="w-4 h-4" />
+                                      </div>
+                                      <button
+                                        type="button"
+                                        disabled={isFirstAula}
+                                        onClick={() => handleMoveAula(selectedCourse.id, mIdx, mIdx - 1)}
+                                        className={`p-1 rounded transition-colors ${isFirstAula ? 'text-zinc-300 cursor-not-allowed' : 'text-zinc-600 hover:text-blue-700 hover:bg-zinc-200 cursor-pointer'}`}
+                                        title="Subir aula"
+                                      >
+                                        <ChevronUp className="w-3.5 h-3.5" />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        disabled={isLastAula}
+                                        onClick={() => handleMoveAula(selectedCourse.id, mIdx, mIdx + 1)}
+                                        className={`p-1 rounded transition-colors ${isLastAula ? 'text-zinc-300 cursor-not-allowed' : 'text-zinc-600 hover:text-blue-700 hover:bg-zinc-200 cursor-pointer'}`}
+                                        title="Descer aula"
+                                      >
+                                        <ChevronDown className="w-3.5 h-3.5" />
+                                      </button>
+                                    </div>
+                                  )}
+
+                                  {/* Expand/Collapse Toggle Button with Title */}
+                                  <button
+                                    type="button"
+                                    onClick={() => toggleAulaCollapsed(mIdx)}
+                                    className="flex items-center gap-2 text-left cursor-pointer group/title min-w-0 flex-1"
+                                    title={isCollapsed ? "Expandir partes da aula" : "Recolher partes da aula"}
+                                  >
+                                    <span className="w-6 h-6 rounded-md bg-blue-50 text-[#0b439c] border border-blue-200 flex items-center justify-center font-black text-xs shrink-0">
+                                      {mIdx + 1}
+                                    </span>
+                                    <span className="font-bold text-xs sm:text-sm text-zinc-900 group-hover/title:text-[#0b439c] transition-colors truncate">
+                                      Aula {mIdx + 1}: {module.title}
+                                    </span>
+                                    <span className="text-[10px] text-zinc-400 font-medium shrink-0">
+                                      ({module.lessons?.length || 0} {module.lessons?.length === 1 ? "Parte" : "Partes"})
+                                    </span>
+                                    <div className="p-0.5 text-zinc-400 group-hover/title:text-zinc-700 shrink-0">
+                                      {isCollapsed ? <ChevronRight className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                                    </div>
+                                  </button>
+                                </div>
+
+                                {/* Aula Management Action Buttons */}
+                                {(courseInfoSourceTab === "cursos_gestao" || accountType === "administrador" || accountType === "instrutor") ? (
+                                  <div className="flex items-center gap-1.5 shrink-0">
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setModuleLessonCourse(selectedCourse);
+                                        setAddType("lesson");
+                                        setAddModuleTitle("");
+                                        setAddLessonTitle("");
+                                        setAddLessonContent("");
+                                        setSelectedTargetModuleIndex(mIdx);
+                                      }}
+                                      className="px-2.5 py-1 bg-blue-50 hover:bg-blue-100 text-[#0b439c] font-bold text-[11px] rounded-lg transition-all cursor-pointer flex items-center gap-1 border border-blue-200"
+                                      title="Adicionar uma nova parte nesta aula"
+                                    >
+                                      <Plus className="w-3 h-3" />
+                                      <span>Adicionar Parte</span>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleOpenEditAula(selectedCourse.id, mIdx, module.title, module.aulaId)}
+                                      className="p-1.5 bg-zinc-100 hover:bg-zinc-200 text-zinc-600 font-bold text-[11px] rounded-lg border border-zinc-200 transition-all cursor-pointer"
+                                      title="Editar título da aula"
+                                    >
+                                      <Edit3 className="w-3 h-3" />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleDeleteAula(selectedCourse.id, mIdx)}
+                                      className="p-1.5 bg-red-50 hover:bg-red-100 text-red-600 font-bold text-[11px] rounded-lg border border-red-200 transition-all cursor-pointer"
+                                      title="Excluir aula e suas partes"
+                                    >
+                                      <Trash2 className="w-3 h-3" />
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <span className="text-[11px] text-zinc-400 font-medium">
+                                    {module.lessons?.length || 0} {module.lessons?.length === 1 ? "Parte" : "Partes"}
+                                  </span>
+                                )}
+                              </div>
+
+                              {/* Partes List (indented slightly to the right, hidden when collapsed) */}
+                              {!isCollapsed && (
+                                <div className="space-y-1.5 pl-4 sm:pl-7 border-l-2 border-blue-100 ml-3 pt-1">
+                                  {(!module.lessons || module.lessons.length === 0) ? (
+                                    <div className="p-3 bg-zinc-50 rounded-xl border border-dashed border-zinc-200 text-center text-xs text-zinc-400">
+                                      Nenhuma parte cadastrada nesta aula ainda.
+                                    </div>
+                                  ) : (
+                                    module.lessons.map((lesson, lIdx) => {
+                                      const isCompleted = isLessonCompleted(selectedCourse.id, mIdx, lIdx);
+                                      const isFirstParte = lIdx === 0;
+                                      const isLastParte = lIdx === module.lessons.length - 1;
+
+                                      return (
+                                        <div
+                                          key={lIdx}
+                                          onDragOver={(e) => {
+                                            e.preventDefault();
+                                          }}
+                                          onDrop={(e) => {
+                                            e.preventDefault();
+                                            const sourceParteStr = e.dataTransfer.getData("text/parte-index");
+                                            if (sourceParteStr !== "") {
+                                              const [sModIdx, sLesIdx] = sourceParteStr.split(":").map(Number);
+                                              if (sModIdx === mIdx && sLesIdx !== lIdx) {
+                                                handleMoveParte(selectedCourse.id, mIdx, sLesIdx, lIdx);
+                                              }
+                                            }
+                                          }}
+                                          className="p-2.5 sm:p-3 bg-zinc-50 hover:bg-white border border-zinc-200 rounded-xl flex items-center justify-between gap-2.5 transition-all group shadow-2xs"
+                                        >
+                                          <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                                            {/* Parte Drag Handle & Reorder buttons */}
+                                            {(courseInfoSourceTab === "cursos_gestao" || accountType === "administrador" || accountType === "instrutor") && (
+                                              <div className="flex items-center gap-0.5 shrink-0 bg-white p-0.5 rounded border border-zinc-200 shadow-2xs">
+                                                <div
+                                                  draggable={true}
+                                                  onDragStart={(e) => {
+                                                    e.dataTransfer.setData("text/parte-index", `${mIdx}:${lIdx}`);
+                                                  }}
+                                                  className="cursor-grab active:cursor-grabbing p-0.5 text-zinc-400 hover:text-zinc-700 rounded transition-colors"
+                                                  title="Arraste para reordenar esta parte"
+                                                >
+                                                  <GripVertical className="w-3.5 h-3.5" />
+                                                </div>
+                                                <button
+                                                  type="button"
+                                                  disabled={isFirstParte}
+                                                  onClick={() => handleMoveParte(selectedCourse.id, mIdx, lIdx, lIdx - 1)}
+                                                  className={`p-0.5 rounded transition-colors ${isFirstParte ? 'text-zinc-300 cursor-not-allowed' : 'text-zinc-600 hover:text-blue-700 cursor-pointer'}`}
+                                                  title="Subir parte"
+                                                >
+                                                  <ChevronUp className="w-3 h-3" />
+                                                </button>
+                                                <button
+                                                  type="button"
+                                                  disabled={isLastParte}
+                                                  onClick={() => handleMoveParte(selectedCourse.id, mIdx, lIdx, lIdx + 1)}
+                                                  className={`p-0.5 rounded transition-colors ${isLastParte ? 'text-zinc-300 cursor-not-allowed' : 'text-zinc-600 hover:text-blue-700 cursor-pointer'}`}
+                                                  title="Descer parte"
+                                                >
+                                                  <ChevronDown className="w-3 h-3" />
+                                                </button>
+                                              </div>
+                                            )}
+
+                                            {(courseInfoSourceTab === "cursos_gestao" || accountType === "administrador" || accountType === "instrutor") ? (
+                                              <BookOpen className="w-3.5 h-3.5 text-[#0b439c] shrink-0" />
+                                            ) : isCompleted ? (
+                                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                            ) : (
+                                              <Play className="w-3.5 h-3.5 text-zinc-400 group-hover:text-[#0b439c] shrink-0" />
+                                            )}
+
+                                            <div className="min-w-0 flex-1">
+                                              <p className="text-xs font-semibold text-zinc-800 truncate">
+                                                Parte {lIdx + 1}: {lesson.title}
+                                              </p>
+                                            </div>
+                                          </div>
+
+                                          {/* Parte Actions */}
+                                          <div className="flex items-center gap-2 shrink-0">
+                                            {(courseInfoSourceTab === "cursos_gestao" || accountType === "administrador" || accountType === "instrutor") ? (
+                                              <div className="flex items-center gap-1.5">
+                                                <button
+                                                  type="button"
+                                                  onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    setEditingLesson({
+                                                      courseId: selectedCourse.id,
+                                                      moduleIndex: mIdx,
+                                                      lessonIndex: lIdx,
+                                                      title: lesson.title,
+                                                      content: lesson.content || ""
+                                                    });
+                                                  }}
+                                                  className="px-2 py-1 bg-white hover:bg-zinc-100 text-zinc-700 font-bold text-[11px] rounded-lg border border-zinc-200 transition-all cursor-pointer flex items-center gap-1 shadow-2xs"
+                                                >
+                                                  <Edit3 className="w-3 h-3 text-zinc-500" />
+                                                  <span>Editar</span>
+                                                </button>
+                                                <button
+                                                  type="button"
+                                                  onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    handleDeleteLesson(selectedCourse.id, mIdx, lIdx);
+                                                  }}
+                                                  className="px-2 py-1 bg-red-50 hover:bg-red-100 text-red-600 font-bold text-[11px] rounded-lg border border-red-200 transition-all cursor-pointer flex items-center gap-1"
+                                                >
+                                                  <Trash2 className="w-3 h-3" />
+                                                  <span>Excluir</span>
+                                                </button>
+                                              </div>
+                                            ) : (
+                                              <button
+                                                onClick={() => handleSelectLesson(selectedCourse, mIdx, lIdx)}
+                                                className="text-xs font-bold text-[#0b439c] hover:underline flex items-center gap-1 cursor-pointer"
+                                              >
+                                                Ver Aula <ChevronRight className="w-3.5 h-3.5" />
+                                              </button>
+                                            )}
+                                          </div>
+                                        </div>
+                                      );
+                                    })
+                                  )}
+
+                                  {/* Quick add parte button inside expanded aula */}
+                                  {(courseInfoSourceTab === "cursos_gestao" || accountType === "administrador" || accountType === "instrutor") && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setModuleLessonCourse(selectedCourse);
+                                        setAddType("lesson");
+                                        setAddModuleTitle("");
+                                        setAddLessonTitle("");
+                                        setAddLessonContent("");
+                                        setSelectedTargetModuleIndex(mIdx);
+                                      }}
+                                      className="w-full py-2 border border-dashed border-blue-200 hover:border-blue-400 bg-blue-50/30 hover:bg-blue-50/60 rounded-xl text-xs font-bold text-[#0b439c] flex items-center justify-center gap-1.5 transition-all cursor-pointer mt-1"
+                                    >
+                                      <Plus className="w-3.5 h-3.5" />
+                                      <span>Adicionar Nova Parte na Aula {mIdx + 1}</span>
+                                    </button>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })
+                      )}
                     </div>
+
+                    {/* Bottom Add Aula Button */}
+                    {(courseInfoSourceTab === "cursos_gestao" || accountType === "administrador" || accountType === "instrutor") && selectedCourse.modules && selectedCourse.modules.length > 0 && (
+                      <div className="p-4 bg-zinc-50 border-t border-zinc-200">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setModuleLessonCourse(selectedCourse);
+                            setAddType("module");
+                            setAddModuleTitle("");
+                            setAddLessonTitle("");
+                            setAddLessonContent("");
+                            setSelectedTargetModuleIndex(0);
+                          }}
+                          className="w-full py-3 bg-white hover:bg-blue-50 border-2 border-dashed border-zinc-300 hover:border-[#0b439c] rounded-xl text-xs font-bold text-zinc-700 hover:text-[#0b439c] transition-all flex items-center justify-center gap-2 cursor-pointer shadow-2xs"
+                        >
+                          <Plus className="w-4 h-4 text-[#0b439c]" />
+                          <span>Adicionar Mais Uma Aula neste Curso</span>
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -12028,7 +12724,7 @@ export default function App() {
                   }`}
                 >
                   <BookOpen className="w-5 h-5" />
-                  GESTÃO DE CURSOS
+                  GESTÃO DE ESTUDOS
                 </button>
 
                 <button
@@ -12428,6 +13124,396 @@ export default function App() {
         </div>
       )}
 
+      {/* Modal: Criar Nova Trilha de Estudo */}
+      {isCreateTrilhaModalOpen && (
+        <div
+          className="fixed inset-0 bg-black/60 backdrop-blur-xs z-[200] flex items-center justify-center p-4 overflow-y-auto overscroll-contain"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <motion.div
+            initial={{ scale: 0.95, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            onClick={(e) => e.stopPropagation()}
+            className="bg-white rounded-2xl p-6 max-w-lg w-full shadow-2xl border border-zinc-200 space-y-5 max-h-[90vh] overflow-y-auto overscroll-contain"
+          >
+            <div className="flex items-center justify-between border-b border-zinc-100 pb-4">
+              <h3 className="font-display font-black text-lg text-zinc-900 flex items-center gap-2">
+                <Plus className="w-5 h-5 text-[#0b439c]" />
+                Cadastrar Nova Trilha de Estudo
+              </h3>
+              <button
+                type="button"
+                onClick={() => setIsCreateTrilhaModalOpen(false)}
+                className="p-1 text-zinc-400 hover:text-zinc-600 rounded-lg cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateTrilha} className="space-y-4">
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-zinc-600 uppercase tracking-wider block">
+                  Nome da Trilha
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={newTrilhaName}
+                  onChange={(e) => setNewTrilhaName(e.target.value)}
+                  placeholder="Ex: Formação Full Stack Developer"
+                  className="w-full bg-zinc-50 border border-zinc-200 rounded-xl px-3.5 py-2.5 text-sm font-semibold text-zinc-900 focus:outline-none focus:border-blue-600 focus:bg-white transition-all"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-zinc-600 uppercase tracking-wider block">
+                  Descrição
+                </label>
+                <textarea
+                  rows={3}
+                  value={newTrilhaDescription}
+                  onChange={(e) => setNewTrilhaDescription(e.target.value)}
+                  placeholder="Descreva a trilha, competências desenvolvidas e público-alvo..."
+                  className="w-full bg-zinc-50 border border-zinc-200 rounded-xl p-3.5 text-sm font-semibold text-zinc-900 focus:outline-none focus:border-blue-600 focus:bg-white transition-all"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-zinc-600 uppercase tracking-wider block">
+                  Gradiente ou Cor de Destaque
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={newTrilhaGradientColor}
+                    onChange={(e) => setNewTrilhaGradientColor(e.target.value)}
+                    placeholder="from-blue-600 to-indigo-600"
+                    className="w-full bg-zinc-50 border border-zinc-200 rounded-xl px-3.5 py-2.5 text-sm font-semibold text-zinc-900 focus:outline-none focus:border-blue-600 focus:bg-white transition-all"
+                  />
+                  <div className={`w-10 h-10 rounded-xl bg-gradient-to-r ${newTrilhaGradientColor || 'from-blue-600 to-indigo-600'} shrink-0 shadow-2xs border border-zinc-200`} />
+                </div>
+                <div className="flex items-center gap-2 pt-1 flex-wrap">
+                  {[
+                    "from-blue-600 to-indigo-600",
+                    "from-emerald-600 to-teal-700",
+                    "from-purple-600 to-violet-700",
+                    "from-amber-600 to-orange-700",
+                    "from-rose-600 to-pink-700",
+                    "from-slate-700 to-zinc-900"
+                  ].map((grad, gIdx) => (
+                    <button
+                      key={gIdx}
+                      type="button"
+                      onClick={() => setNewTrilhaGradientColor(grad)}
+                      className={`w-7 h-7 rounded-lg bg-gradient-to-r ${grad} border border-zinc-300 hover:scale-110 transition-transform cursor-pointer`}
+                      title={grad}
+                    />
+                  ))}
+                </div>
+              </div>
+
+              <div className="pt-3 flex items-center justify-end gap-3 border-t border-zinc-100">
+                <button
+                  type="button"
+                  onClick={() => setIsCreateTrilhaModalOpen(false)}
+                  className="px-4 py-2.5 bg-zinc-100 hover:bg-zinc-200 text-zinc-700 font-bold text-xs rounded-xl transition-all cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2.5 bg-[#0b439c] hover:bg-blue-800 text-white font-bold text-xs rounded-xl transition-all shadow-md cursor-pointer flex items-center gap-2"
+                >
+                  Cadastrar Trilha
+                </button>
+              </div>
+            </form>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Modal: Ver Dados e Editar Trilha de Estudo */}
+      {editingTrilha && (
+        <div
+          className="fixed inset-0 bg-black/60 backdrop-blur-xs z-[200] flex items-center justify-center p-4 overflow-y-auto overscroll-contain"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <motion.div
+            initial={{ scale: 0.95, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            onClick={(e) => e.stopPropagation()}
+            className="bg-white rounded-2xl p-6 max-w-lg w-full shadow-2xl border border-zinc-200 space-y-5 max-h-[90vh] overflow-y-auto overscroll-contain"
+          >
+            <div className="flex items-center justify-between border-b border-zinc-100 pb-4">
+              <div>
+                <h3 className="font-display font-black text-lg text-zinc-900 flex items-center gap-2">
+                  <Edit3 className="w-5 h-5 text-[#0b439c]" />
+                  Dados da Trilha de Estudo
+                </h3>
+                <p className="text-xs text-zinc-500 mt-0.5">
+                  Atualize as informações da trilha ou acione a exclusão.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingTrilha(null)}
+                className="p-1 text-zinc-400 hover:text-zinc-600 rounded-lg cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEditTrilha} className="space-y-4">
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-zinc-600 uppercase tracking-wider block">
+                  Nome da Trilha
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={editTrilhaName}
+                  onChange={(e) => setEditTrilhaName(e.target.value)}
+                  className="w-full bg-zinc-50 border border-zinc-200 rounded-xl px-3.5 py-2.5 text-sm font-semibold text-zinc-900 focus:outline-none focus:border-blue-600 focus:bg-white transition-all"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-zinc-600 uppercase tracking-wider block">
+                  Descrição
+                </label>
+                <textarea
+                  rows={3}
+                  value={editTrilhaDescription}
+                  onChange={(e) => setEditTrilhaDescription(e.target.value)}
+                  className="w-full bg-zinc-50 border border-zinc-200 rounded-xl p-3.5 text-sm font-semibold text-zinc-900 focus:outline-none focus:border-blue-600 focus:bg-white transition-all"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-zinc-600 uppercase tracking-wider block">
+                  Gradiente ou Cor de Destaque
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={editTrilhaGradientColor}
+                    onChange={(e) => setEditTrilhaGradientColor(e.target.value)}
+                    className="w-full bg-zinc-50 border border-zinc-200 rounded-xl px-3.5 py-2.5 text-sm font-semibold text-zinc-900 focus:outline-none focus:border-blue-600 focus:bg-white transition-all"
+                  />
+                  <div className={`w-10 h-10 rounded-xl bg-gradient-to-r ${editTrilhaGradientColor || 'from-blue-600 to-indigo-600'} shrink-0 shadow-2xs border border-zinc-200`} />
+                </div>
+              </div>
+
+              {/* Danger Zone: Excluir Trilha */}
+              <div className="p-3.5 bg-red-50/60 border border-red-200 rounded-xl flex items-center justify-between gap-3">
+                <div className="space-y-0.5">
+                  <span className="text-xs font-bold text-red-900 block">Excluir esta Trilha</span>
+                  <span className="text-[11px] text-red-700">
+                    Exclusão em cascata: remove todos os cursos, aulas e partes vinculados.
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const t = editingTrilha;
+                    setEditingTrilha(null);
+                    handleRequestDeleteTrilha(t);
+                  }}
+                  className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white font-bold text-xs rounded-lg transition-all shrink-0 cursor-pointer shadow-2xs"
+                >
+                  Excluir
+                </button>
+              </div>
+
+              <div className="pt-3 flex items-center justify-end gap-3 border-t border-zinc-100">
+                <button
+                  type="button"
+                  onClick={() => setEditingTrilha(null)}
+                  className="px-4 py-2.5 bg-zinc-100 hover:bg-zinc-200 text-zinc-700 font-bold text-xs rounded-xl transition-all cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2.5 bg-[#0b439c] hover:bg-blue-800 text-white font-bold text-xs rounded-xl transition-all shadow-md cursor-pointer flex items-center gap-2"
+                >
+                  Salvar Alterações
+                </button>
+              </div>
+            </form>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Modal: Exclusão em Cascata de Trilha */}
+      {trilhaToDelete && (
+        <div
+          className="fixed inset-0 bg-black/60 backdrop-blur-xs z-[250] flex items-center justify-center p-4 overflow-y-auto overscroll-contain"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <motion.div
+            initial={{ scale: 0.95, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            onClick={(e) => e.stopPropagation()}
+            className="bg-white rounded-2xl p-6 max-w-lg w-full shadow-2xl border border-red-200 space-y-5 max-h-[90vh] overflow-y-auto overscroll-contain"
+          >
+            <div className="flex items-center justify-between border-b border-red-100 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-red-100 text-red-600 flex items-center justify-center shrink-0">
+                  <AlertTriangle className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-display font-black text-lg text-red-900 leading-tight">
+                    Excluir Trilha em Cascata
+                  </h3>
+                  <p className="text-xs text-red-700 mt-0.5">
+                    Ação permanente e irreversível
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setTrilhaToDelete(null)}
+                className="p-1 text-zinc-400 hover:text-zinc-600 rounded-lg cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleConfirmDeleteTrilha} className="space-y-4">
+              <div className="p-4 bg-red-50 border border-red-200 rounded-xl space-y-2 text-xs text-red-800">
+                <p className="font-bold text-sm">
+                  Você está prestes a excluir a trilha "{trilhaToDelete.nome_da_trilha}".
+                </p>
+                <p>
+                  Por regra de integridade do sistema, ao excluir esta trilha serão excluídos permanentemente:
+                </p>
+                <ul className="list-disc pl-4 space-y-1 text-red-700 font-medium">
+                  <li>Todos os {courses.filter(c => Number(c.id_trilha) === Number(trilhaToDelete.id)).length} cursos vinculados a esta trilha</li>
+                  <li>Todas as aulas cadastradas em cada um desses cursos</li>
+                  <li>Todas as partes e testes de fixação correspondentes</li>
+                  <li>Todos os registros de progresso dos alunos nesses cursos</li>
+                </ul>
+              </div>
+
+              {/* Password authorization */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-zinc-700 block">
+                  Digite sua senha de login para confirmar a exclusão:
+                </label>
+                <div className="relative">
+                  <input
+                    type={showDeleteTrilhaPassword ? "text" : "password"}
+                    required
+                    value={deleteTrilhaPassword}
+                    onChange={(e) => {
+                      setDeleteTrilhaPassword(e.target.value);
+                      setDeleteTrilhaErrorMsg("");
+                    }}
+                    placeholder="Sua senha atual"
+                    className="w-full bg-zinc-50 border border-zinc-200 rounded-xl px-3.5 py-2.5 text-sm font-semibold text-zinc-900 focus:outline-none focus:border-red-500 pr-10"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowDeleteTrilhaPassword(p => !p)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-600"
+                  >
+                    {showDeleteTrilhaPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+                {deleteTrilhaErrorMsg && (
+                  <p className="text-xs font-bold text-red-600">{deleteTrilhaErrorMsg}</p>
+                )}
+              </div>
+
+              <div className="pt-3 flex items-center justify-end gap-3 border-t border-zinc-100">
+                <button
+                  type="button"
+                  onClick={() => setTrilhaToDelete(null)}
+                  className="px-4 py-2.5 bg-zinc-100 hover:bg-zinc-200 text-zinc-700 font-bold text-xs rounded-xl transition-all cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={isDeletingTrilha}
+                  className="px-5 py-2.5 bg-red-600 hover:bg-red-700 text-white font-bold text-xs rounded-xl transition-all shadow-md cursor-pointer flex items-center gap-2"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  {isDeletingTrilha ? "Excluindo..." : "Confirmar Exclusão em Cascata"}
+                </button>
+              </div>
+            </form>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Modal: Editar Título da Aula */}
+      {editingAula && (
+        <div
+          className="fixed inset-0 bg-black/60 backdrop-blur-xs z-[200] flex items-center justify-center p-4 overflow-y-auto overscroll-contain"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <motion.div
+            initial={{ scale: 0.95, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            onClick={(e) => e.stopPropagation()}
+            className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl border border-zinc-200 space-y-5 max-h-[90vh] overflow-y-auto overscroll-contain"
+          >
+            <div className="flex items-center justify-between border-b border-zinc-100 pb-4">
+              <div>
+                <h3 className="font-display font-black text-lg text-zinc-900 flex items-center gap-2">
+                  <Edit3 className="w-5 h-5 text-[#0b439c]" />
+                  Editar Aula {editingAula.moduleIndex + 1}
+                </h3>
+                <p className="text-xs text-zinc-500 mt-0.5">
+                  Atualize o título da aula. As partes serão mantidas.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingAula(null)}
+                className="p-1 text-zinc-400 hover:text-zinc-600 rounded-lg cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEditAula} className="space-y-4">
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-zinc-600 uppercase tracking-wider block">
+                  Título da Aula
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={editAulaTitle}
+                  onChange={(e) => setEditAulaTitle(e.target.value)}
+                  placeholder="Ex: Introdução aos Seletores CSS"
+                  className="w-full bg-zinc-50 border border-zinc-200 rounded-xl px-3.5 py-2.5 text-sm font-semibold text-zinc-900 focus:outline-none focus:border-blue-600 focus:bg-white transition-all"
+                />
+              </div>
+
+              <div className="pt-3 flex items-center justify-end gap-3 border-t border-zinc-100">
+                <button
+                  type="button"
+                  onClick={() => setEditingAula(null)}
+                  className="px-4 py-2.5 bg-zinc-100 hover:bg-zinc-200 text-zinc-700 font-bold text-xs rounded-xl transition-all cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2.5 bg-[#0b439c] hover:bg-blue-800 text-white font-bold text-xs rounded-xl transition-all shadow-md cursor-pointer flex items-center gap-2"
+                >
+                  Salvar Título
+                </button>
+              </div>
+            </form>
+          </motion.div>
+        </div>
+      )}
+
       {/* Camada: Modal Criar Novo Curso */}
       {isCreateCourseModalOpen && (
         <div
@@ -12519,16 +13605,20 @@ export default function App() {
 
               <div className="space-y-1.5">
                 <label className="text-xs font-bold text-zinc-600 uppercase tracking-wider block">
-                  Instrutor
+                  Vincular à Trilha de Estudo
                 </label>
-                <input
-                  type="text"
-                  required
-                  value={newCourseInstructor}
-                  onChange={(e) => setNewCourseInstructor(e.target.value)}
-                  placeholder="Ex: Dr. Carlos Oliveira"
-                  className="w-full bg-zinc-50 border border-zinc-200 rounded-xl px-3.5 py-2.5 text-sm font-semibold text-zinc-900 focus:outline-none focus:border-blue-600 focus:bg-white transition-all"
-                />
+                <select
+                  value={newCourseTrilhaId}
+                  onChange={(e) => setNewCourseTrilhaId(e.target.value)}
+                  className="w-full bg-zinc-50 border border-zinc-200 rounded-xl px-3.5 py-2.5 text-sm font-semibold text-zinc-800 focus:outline-none cursor-pointer"
+                >
+                  <option value="">Nenhuma (Curso sem Trilha)</option>
+                  {trilhas.map((t) => (
+                    <option key={t.id} value={String(t.id)}>
+                      {t.nome_da_trilha}
+                    </option>
+                  ))}
+                </select>
               </div>
 
               <div className="space-y-1.5">
@@ -13070,15 +14160,20 @@ export default function App() {
 
                 <div className="space-y-1.5">
                   <label className="text-xs font-bold text-zinc-600 uppercase tracking-wider block">
-                    Instrutor
+                    Vincular à Trilha
                   </label>
-                  <input
-                    type="text"
-                    required
-                    value={editCourseInstructor}
-                    onChange={(e) => setEditCourseInstructor(e.target.value)}
-                    className="w-full bg-zinc-50 border border-zinc-200 rounded-xl px-3.5 py-2.5 text-sm font-semibold text-zinc-900 focus:outline-none focus:border-blue-600 focus:bg-white transition-all"
-                  />
+                  <select
+                    value={editCourseTrilhaId}
+                    onChange={(e) => setEditCourseTrilhaId(e.target.value)}
+                    className="w-full bg-zinc-50 border border-zinc-200 rounded-xl px-3.5 py-2.5 text-sm font-semibold text-zinc-800 focus:outline-none cursor-pointer"
+                  >
+                    <option value="">Nenhuma (Curso sem Trilha)</option>
+                    {trilhas.map((t) => (
+                      <option key={t.id} value={String(t.id)}>
+                        {t.nome_da_trilha}
+                      </option>
+                    ))}
+                  </select>
                 </div>
               </div>
 
