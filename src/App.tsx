@@ -1274,6 +1274,9 @@ export default function App() {
     if (tab !== "projects") {
       setAutoOpenEditorInProjects(false);
     }
+    if (tab === "cursos_gestao") {
+      setIsViewingCourseInfo(false);
+    }
     setActiveTab(tab);
     scrollToTop();
   }, [scrollToTop]);
@@ -7250,7 +7253,7 @@ export default function App() {
                 type="button"
                 onClick={() => navigateToTab("cursos_gestao")}
                 className={`w-full flex items-center gap-3 px-3.5 py-3 rounded-xl font-bold text-sm transition-all text-left cursor-pointer ${
-                  activeTab === "cursos_gestao"
+                  activeTab === "cursos_gestao" || activeTab === "lesson-view"
                     ? "bg-[#0b439c] text-white shadow-md shadow-blue-900/10"
                     : "text-zinc-700 hover:bg-zinc-100"
                 }`}
@@ -12734,7 +12737,7 @@ export default function App() {
                     setIsMobileMenuOpen(false);
                   }}
                   className={`w-full flex items-center gap-3 px-3.5 py-3 rounded-xl font-bold text-sm transition-all text-left cursor-pointer ${
-                    activeTab === "cursos_gestao"
+                    activeTab === "cursos_gestao" || activeTab === "lesson-view"
                       ? "bg-[#0b439c] text-white shadow-md shadow-blue-900/10"
                       : "text-zinc-700 hover:bg-zinc-100"
                   }`}
