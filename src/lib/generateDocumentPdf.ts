@@ -30,9 +30,11 @@ export function buildDocumentPdfDoc(docItem: DocumentItem): any {
   const dataAtual = now.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" });
   const horaAtual = now.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
 
+  const cleanTitle = (docItem.titulo || "Documento").trim() || "Documento";
+
   doc.setProperties({
-    title: `${docItem.titulo} - Programa Certo`,
-    subject: "Documento Oficial - Plataforma Educacional",
+    title: cleanTitle,
+    subject: `Documento Oficial - ${cleanTitle}`,
     author: "Programa Certo",
     keywords: "Programa Certo, Documento, Certificado, Declaração",
     creator: "Programa Certo"
@@ -403,16 +405,75 @@ export function generateDocumentPdfBlobUrl(docItem: DocumentItem): string {
 }
 
 /**
- * Abre o PDF na Web para visualização direta de qualquer pessoa,
- * sem download forçado e sem restrições.
+ * Sanitiza o nome do documento para ser usado como nome oficial de arquivo .pdf
+ * sem caracteres inválidos ou números/letras aleatórias.
  */
-export function openDocumentPdfInBrowser(docItem: DocumentItem) {
+export function getCleanDocFilename(title?: string): string {
+  const raw = (title || "").trim() || "Documento";
+  const safe = raw
+    .replace(/[\\/:*?"<>|#%&{}\\$!'@+`=]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const base = safe || "Documento";
+  return base.toLowerCase().endsWith(".pdf") ? base : `${base}.pdf`;
+}
+
+/**
+ * Faz download direto do arquivo PDF oficial no dispositivo do usuário
+ * com o nome exato do documento cadastrado (sem códigos, UUIDs ou caracteres estranhos).
+ */
+export function downloadDocumentPdf(docItem: DocumentItem): boolean {
   try {
-    const blobUrl = generateDocumentPdfBlobUrl(docItem);
+    const doc = buildDocumentPdfDoc(docItem);
+    const cleanFilename = getCleanDocFilename(docItem.titulo);
+    doc.save(cleanFilename);
+    return true;
+  } catch (err) {
+    console.error("Erro ao baixar documento em PDF:", err);
+    return false;
+  }
+}
+
+/**
+ * Abre o PDF na Web para visualização direta com o nome do arquivo preservado na URL,
+ * garantindo que downloads ou impressões do visualizador mantenham o nome oficial.
+ */
+export async function openDocumentPdfInBrowser(docItem: DocumentItem) {
+  try {
+    const doc = buildDocumentPdfDoc(docItem);
+    const cleanFilename = getCleanDocFilename(docItem.titulo);
+
+    // Enviar para o endpoint oficial do servidor para servir na URL com o nome real
+    try {
+      const dataUri = doc.output("datauristring");
+      const base64 = dataUri.split(",")[1];
+      if (base64) {
+        const res = await fetch("/api/documentos/prepare-pdf", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ pdfBase64: base64, filename: cleanFilename }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data?.url) {
+            window.open(data.url, "_blank");
+            return;
+          }
+        }
+      }
+    } catch (e) {
+      console.warn("Fallback de abertura de PDF para Blob URL:", e);
+    }
+
+    // Fallback: Blob URL com nome oficial atribuído
+    const arrayBuffer = doc.output("arraybuffer");
+    const blob = new Blob([arrayBuffer], { type: "application/pdf" });
+    const blobUrl = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = blobUrl;
     link.target = "_blank";
     link.rel = "noopener noreferrer";
+    link.download = cleanFilename;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -425,18 +486,39 @@ export function openDocumentPdfInBrowser(docItem: DocumentItem) {
 
 /**
  * Aciona o painel nativo de impressão do sistema/navegador para o documento.
- * Gera o documento PDF oficial com comando AutoPrint embutido (/OpenAction /Print + JS print)
- * e abre via Blob URL local, escapando de qualquer restrição de iframe e abrindo
- * diretamente o diálogo nativo de impressão sem erros de cross-origin.
+ * O nome oficial do documento é embutido na janela e metadados de impressão.
  */
-export function printDocumentInBrowser(docItem: DocumentItem) {
+export async function printDocumentInBrowser(docItem: DocumentItem) {
   try {
     const doc = buildDocumentPdfDoc(docItem);
+    const cleanFilename = getCleanDocFilename(docItem.titulo);
 
     // Embutir instrução nativa de impressão automática no catálogo do PDF
     if (typeof (doc as any).autoPrint === "function") {
       (doc as any).autoPrint({ variant: "non-conform" });
       (doc as any).autoPrint({ variant: "javascript" });
+    }
+
+    // Servir via endpoint oficial se disponível para que o cabeçalho de impressão tenha o nome exato
+    try {
+      const dataUri = doc.output("datauristring");
+      const base64 = dataUri.split(",")[1];
+      if (base64) {
+        const res = await fetch("/api/documentos/prepare-pdf", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ pdfBase64: base64, filename: cleanFilename }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data?.url) {
+            window.open(data.url, "_blank");
+            return;
+          }
+        }
+      }
+    } catch (e) {
+      console.warn("Fallback de impressão para Blob URL:", e);
     }
 
     const arrayBuffer = doc.output("arraybuffer");
@@ -447,6 +529,7 @@ export function printDocumentInBrowser(docItem: DocumentItem) {
     link.href = blobUrl;
     link.target = "_blank";
     link.rel = "noopener noreferrer";
+    link.download = cleanFilename;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);

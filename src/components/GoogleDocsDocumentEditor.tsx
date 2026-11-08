@@ -17,11 +17,12 @@ import {
   X,
   Plus,
   Sparkles,
-  Folder
+  Folder,
+  Download
 } from "lucide-react";
 import { DocumentItem, DocFolder, parseFontSize } from "./DocumentosManager";
 import { LOGO_PROGRAMA_CERTO_BASE64 } from "../lib/logoBase64";
-import { openDocumentPdfInBrowser, printDocumentInBrowser } from "../lib/generateDocumentPdf";
+import { openDocumentPdfInBrowser, printDocumentInBrowser, downloadDocumentPdf } from "../lib/generateDocumentPdf";
 
 export interface GoogleDocsDocumentEditorProps {
   initialDoc: DocumentItem;
@@ -723,6 +724,22 @@ export function GoogleDocsDocumentEditor({
 
             <button
               type="button"
+              onClick={() => {
+                const ok = downloadDocumentPdf(currentDocItem);
+                if (ok) {
+                  setFeedbackToast("Download do PDF iniciado!");
+                  setTimeout(() => setFeedbackToast(null), 3000);
+                }
+              }}
+              className="px-2.5 sm:px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-[#0b439c] rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer border border-blue-200"
+              title="Baixar arquivo PDF com o nome do documento no dispositivo"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>Baixar PDF</span>
+            </button>
+
+            <button
+              type="button"
               onClick={() => printDocumentInBrowser(currentDocItem)}
               className="px-2.5 sm:px-3 py-1.5 bg-zinc-100 hover:bg-zinc-200 text-zinc-800 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer border border-zinc-200"
               title="Imprimir documento oficial"
@@ -983,7 +1000,8 @@ export function GoogleDocsDocumentEditor({
                   onClick={() => setIsSignaturesPanelOpen(false)}
                 />
 
-                <div className="absolute left-0 top-full mt-2 w-[calc(100vw-32px)] max-w-sm sm:w-96 bg-white border border-zinc-200 rounded-2xl shadow-2xl p-4 z-50 space-y-4 animate-in fade-in zoom-in-95 duration-150">
+                {/* PAINEL FLUTUANTE DE CONFIGURAÇÃO DE ASSINATURAS (ABRE PARA O INTERIOR: right-0) */}
+                <div className="absolute right-0 top-full mt-2 w-[calc(100vw-32px)] max-w-sm sm:w-96 max-h-[80vh] overflow-y-auto bg-white border border-zinc-200 rounded-2xl shadow-2xl p-4 z-50 space-y-4 animate-in fade-in zoom-in-95 duration-150">
                   <div className="flex items-center justify-between border-b border-zinc-100 pb-2">
                     <div className="flex items-center gap-1.5">
                       <PenTool className="w-4 h-4 text-[#0b439c]" />

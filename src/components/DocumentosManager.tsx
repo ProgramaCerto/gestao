@@ -36,11 +36,13 @@ import {
   Eye,
   EyeOff,
   ChevronUp,
-  ChevronDown
+  ChevronDown,
+  Download,
+  Edit3
 } from "lucide-react";
 import { supabase, isSupabaseConfigured } from "../lib/supabase";
 import { LOGO_PROGRAMA_CERTO_BASE64 } from "../lib/logoBase64";
-import { openDocumentPdfInBrowser, printDocumentInBrowser } from "../lib/generateDocumentPdf";
+import { openDocumentPdfInBrowser, printDocumentInBrowser, downloadDocumentPdf } from "../lib/generateDocumentPdf";
 import { GoogleDocsDocumentEditor } from "./GoogleDocsDocumentEditor";
 
 export interface DocFolder {
@@ -1219,6 +1221,11 @@ export function DocumentosManager({
   const [showMoveModal, setShowMoveModal] = useState(false);
   const [targetMoveFolder, setTargetMoveFolder] = useState<string | null>(null);
 
+  // Modal para renomear documento diretamente
+  const [renameModalDoc, setRenameModalDoc] = useState<DocumentItem | null>(null);
+  const [renameNewTitle, setRenameNewTitle] = useState("");
+  const [isRenaming, setIsRenaming] = useState(false);
+
   // Modal de confirmação de exclusão
   const [deleteConfirmation, setDeleteConfirmation] = useState<{
     isOpen: boolean;
@@ -1902,6 +1909,40 @@ export function DocumentosManager({
     printDocumentInBrowser(doc);
   };
 
+  // Renomear documento diretamente
+  const handleOpenRenameModal = (doc: DocumentItem) => {
+    setRenameModalDoc(doc);
+    setRenameNewTitle(doc.titulo || "");
+  };
+
+  const handleConfirmRenameDoc = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!renameModalDoc || !renameNewTitle.trim()) return;
+    setIsRenaming(true);
+    const updatedTitle = renameNewTitle.trim();
+    try {
+      if (supabase && isSupabaseConfigured) {
+        const { error } = await supabase
+          .from("documentos")
+          .update({ titulo: updatedTitle, atualizado_em: new Date().toISOString() })
+          .eq("id", renameModalDoc.id);
+        if (error) throw error;
+      }
+
+      setDocuments((prev) =>
+        prev.map((d) => (d.id === renameModalDoc.id ? { ...d, titulo: updatedTitle } : d))
+      );
+      setSyncFeedback(`Documento renomeado para "${updatedTitle}" com sucesso!`);
+      setTimeout(() => setSyncFeedback(null), 3500);
+      setRenameModalDoc(null);
+    } catch (err) {
+      console.error("Erro ao renomear documento:", err);
+      alert("Erro ao renomear documento.");
+    } finally {
+      setIsRenaming(false);
+    }
+  };
+
 
   return (
     <motion.div
@@ -2301,6 +2342,19 @@ export function DocumentosManager({
               >
                 <ExternalLink className="w-4 h-4 text-blue-400" />
                 <span>Abrir na Web</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  const docObj = documents.find((d) => d.id === editingDocId);
+                  if (docObj) downloadDocumentPdf(docObj);
+                }}
+                className="px-4 py-2 bg-blue-50 hover:bg-blue-100 text-[#0b439c] rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 shadow-xs cursor-pointer border border-blue-200"
+                title="Baixar arquivo PDF com o nome do documento"
+              >
+                <Download className="w-4 h-4" />
+                <span>Baixar PDF</span>
               </button>
 
               <button
@@ -2917,6 +2971,20 @@ export function DocumentosManager({
                           <Printer className="w-4 h-4" />
                         </button>
 
+                        {/* Baixar PDF com o nome oficial */}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            downloadDocumentPdf(doc);
+                          }}
+                          className="p-2 bg-emerald-50 hover:bg-emerald-600 text-emerald-700 hover:text-white rounded-xl transition-all flex items-center justify-center cursor-pointer shadow-2xs border border-emerald-200/80"
+                          title="Baixar arquivo PDF com o nome do documento"
+                          aria-label="Baixar arquivo PDF"
+                        >
+                          <Download className="w-4 h-4" />
+                        </button>
+
                         {/* 2. Lapisinho (Editar documento) */}
                         <button
                           type="button"
@@ -2929,6 +2997,20 @@ export function DocumentosManager({
                           aria-label="Editar documento"
                         >
                           <Pencil className="w-4 h-4" />
+                        </button>
+
+                        {/* Renomear Nome do Documento */}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleOpenRenameModal(doc);
+                          }}
+                          className="p-2 bg-indigo-50 hover:bg-indigo-600 text-indigo-700 hover:text-white rounded-xl transition-all flex items-center justify-center cursor-pointer shadow-2xs border border-indigo-200/80"
+                          title="Renomear documento"
+                          aria-label="Renomear documento"
+                        >
+                          <Edit3 className="w-4 h-4" />
                         </button>
 
                         {/* 3. Abrir em PDF na Web */}
@@ -3021,6 +3103,63 @@ export function DocumentosManager({
                 Confirmar e Mover
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL DE RENOMEAR DOCUMENTO                                              */}
+      {/* ========================================================================= */}
+      {renameModalDoc && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl border border-zinc-200 w-full max-w-md shadow-2xl p-6 space-y-4 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between border-b pb-3 border-zinc-200">
+              <h3 className="font-bold text-sm text-zinc-900 flex items-center gap-2">
+                <Edit3 className="w-4 h-4 text-[#0b439c]" />
+                <span>Renomear Documento</span>
+              </h3>
+              <button
+                type="button"
+                onClick={() => setRenameModalDoc(null)}
+                className="text-zinc-400 hover:text-zinc-600 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleConfirmRenameDoc} className="space-y-4">
+              <div className="space-y-1.5 text-xs">
+                <label className="font-bold text-zinc-700">Novo nome do documento:</label>
+                <input
+                  type="text"
+                  value={renameNewTitle}
+                  onChange={(e) => setRenameNewTitle(e.target.value)}
+                  className="w-full px-3 py-2.5 rounded-xl border border-zinc-300 text-zinc-900 font-bold focus:outline-none focus:border-[#0b439c] focus:ring-2 focus:ring-blue-500/20"
+                  placeholder="Digite o nome do documento..."
+                  autoFocus
+                />
+                <span className="text-[11px] text-zinc-400">
+                  Este nome será usado no título e no nome de arquivo (.pdf) ao baixar ou imprimir.
+                </span>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-zinc-200">
+                <button
+                  type="button"
+                  onClick={() => setRenameModalDoc(null)}
+                  className="px-4 py-2 rounded-xl text-zinc-600 font-bold hover:bg-zinc-100 text-xs cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={!renameNewTitle.trim() || isRenaming}
+                  className="px-5 py-2 rounded-xl bg-[#0b439c] text-white font-bold hover:bg-blue-800 text-xs shadow-xs cursor-pointer disabled:opacity-50"
+                >
+                  {isRenaming ? "Salvando..." : "Salvar Nome"}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

@@ -89,7 +89,87 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use(express.json({ limit: "1mb" }));
+app.use(express.json({ limit: "10mb" }));
+app.use(express.urlencoded({ extended: true, limit: "10mb" }));
+
+// Cache temporário em memória para exibição de PDFs de documentos com nome oficial
+const docPdfCache = new Map<string, { buffer: Buffer; filename: string; expires: number }>();
+
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, value] of docPdfCache.entries()) {
+    if (value.expires < now) docPdfCache.delete(key);
+  }
+}, 5 * 60 * 1000);
+
+app.post("/api/documentos/prepare-pdf", (req, res) => {
+  try {
+    const { pdfBase64, filename } = req.body;
+    if (!pdfBase64) {
+      return res.status(400).json({ error: "pdfBase64 é obrigatório" });
+    }
+    const cleanFilename = (filename || "Documento")
+      .trim()
+      .replace(/[\\/:*?"<>|#%&{}\\$!'@+`=]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim() || "Documento";
+    const finalFilename = cleanFilename.toLowerCase().endsWith(".pdf") ? cleanFilename : `${cleanFilename}.pdf`;
+    
+    const token = Math.random().toString(36).substring(2, 12);
+    const buffer = Buffer.from(pdfBase64, "base64");
+    
+    docPdfCache.set(token, {
+      buffer,
+      filename: finalFilename,
+      expires: Date.now() + 30 * 60 * 1000 // 30 minutos
+    });
+    
+    return res.json({
+      token,
+      url: `/api/documentos/ver/${encodeURIComponent(finalFilename)}?token=${token}`
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err?.message || "Erro ao preparar PDF" });
+  }
+});
+
+app.get("/api/documentos/ver/:filename", (req, res) => {
+  const token = req.query.token as string;
+  const cached = token ? docPdfCache.get(token) : null;
+  
+  if (!cached) {
+    return res.status(404).send(`
+      <!DOCTYPE html>
+      <html lang="pt-BR">
+      <head>
+        <meta charset="UTF-8">
+        <title>Documento</title>
+        <style>
+          body { font-family: sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #f4f4f5; color: #18181b; }
+          .card { background: white; padding: 2rem; border-radius: 1rem; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); text-align: center; max-width: 420px; }
+          h2 { margin-top: 0; color: #0b439c; }
+          p { font-size: 0.9rem; color: #71717a; }
+        </style>
+      </head>
+      <body>
+        <div class="card">
+          <h2>Documento não localizado</h2>
+          <p>O link de visualização expirou. Por favor, volte ao sistema e clique novamente em "Abrir na Web".</p>
+        </div>
+      </body>
+      </html>
+    `);
+  }
+
+  const asciiFilename = cached.filename.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-zA-Z0-9._ -]/g, "");
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader(
+    "Content-Disposition",
+    `inline; filename="${asciiFilename || "Documento.pdf"}"; filename*=UTF-8''${encodeURIComponent(cached.filename)}`
+  );
+  res.setHeader("Cache-Control", "private, max-age=1800");
+  return res.send(cached.buffer);
+});
 
 // Pre-built Programa Certo Courses for instant exploration
 const PREBUILT_COURSES = [
