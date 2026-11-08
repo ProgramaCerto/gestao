@@ -1575,7 +1575,7 @@ export default function App() {
       return "/atendimento";
     }
     if (activeTab === "documentos") {
-      if (routeEditingDocId) return `/documentos/editar-documento-${routeEditingDocId}`;
+      if (routeEditingDocId) return `/documentos/editar/editar-documento/${routeEditingDocId}`;
       return "/documentos";
     }
     if (activeTab === "ocorrencias") return "/ocorrencias";

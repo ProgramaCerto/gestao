@@ -1221,6 +1221,64 @@ export function DocumentosManager({
     }
   }, [viewMode, editingDocId, onEditorModeChange]);
 
+  // Carregar documento diretamente do Supabase se acessado via link direto
+  useEffect(() => {
+    if (!editingDocId || !supabase || !isSupabaseConfigured) return;
+    const exists = documents.some((d) => String(d.id) === String(editingDocId));
+    if (exists) return;
+
+    let isMounted = true;
+    (async () => {
+      try {
+        setIsLoading(true);
+        const isNum = !isNaN(Number(editingDocId)) && Number(editingDocId) > 0;
+        let query = supabase.from("documentos").select("*");
+        if (isNum) {
+          query = query.eq("id", Number(editingDocId));
+        } else {
+          query = query.eq("id", editingDocId);
+        }
+        const { data, error } = await query.maybeSingle();
+        if (isMounted && !error && data) {
+          const mappedDoc: DocumentItem = {
+            id: String(data.id),
+            matricula_usuario: data.matricula_usuario ? String(data.matricula_usuario) : undefined,
+            id_usuario: data.id_usuario ? String(data.id_usuario) : undefined,
+            pasta_id: data.pasta_id !== null && data.pasta_id !== undefined ? String(data.pasta_id) : null,
+            titulo: data.titulo || "Documento sem título",
+            tamanho_titulo: data.tamanho_titulo || 18,
+            estilo_titulo: data.estilo_titulo === "normal" ? "normal" : "negrito",
+            alinhamento_titulo: data.alinhamento_titulo || "center",
+            conteudo: data.conteudo || "<p><br></p>",
+            tamanho_conteudo: data.tamanho_conteudo || 16,
+            alinhamento_conteudo: data.alinhamento_conteudo || "justify",
+            estilo_conteudo: data.estilo_conteudo || "",
+            incluir_assinatura_programa_certo: data.incluir_assinatura_programa_certo !== undefined ? !!data.incluir_assinatura_programa_certo : true,
+            incluir_assinatura_cordenacao: data.incluir_assinatura_cordenacao !== undefined ? !!data.incluir_assinatura_cordenacao : true,
+            incluir_campo_assinatura_aluno: data.incluir_campo_assinatura_aluno !== undefined
+              ? !!data.incluir_campo_assinatura_aluno
+              : !!data.incluir_assinatura_aluno,
+            incluir_assinatura_aluno: data.incluir_assinatura_aluno !== undefined
+              ? !!data.incluir_assinatura_aluno
+              : !!data.incluir_campo_assinatura_aluno,
+            status: data.status || "emitido",
+            criado_em: data.criado_em || new Date().toISOString(),
+            atualizado_em: data.atualizado_em || new Date().toISOString(),
+          };
+          setDocuments((prev) => [mappedDoc, ...prev.filter((d) => String(d.id) !== String(mappedDoc.id))]);
+        }
+      } catch (err) {
+        console.error("Erro ao carregar documento específico:", err);
+      } finally {
+        if (isMounted) setIsLoading(false);
+      }
+    })();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [editingDocId, documents]);
+
   // Formulário: Nova Pasta
   const [newFolderName, setNewFolderName] = useState("");
 
@@ -1296,21 +1354,63 @@ export function DocumentosManager({
     return documents.filter((d) => isSameFolder(d.pasta_id, fId)).length;
   };
 
-  // Abrir tela de criação de documento diretamente no editor Google Docs
-  const handleOpenCreateDoc = () => {
-    const newId = typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `doc_${Date.now()}`;
+  // Abrir tela de criação de documento diretamente no editor Google Docs e criar no banco de dados imediatamente
+  const handleOpenCreateDoc = async () => {
+    setIsLoading(true);
     const now = new Date().toISOString();
+    const safePastaId = cleanDbPastaId(currentFolderId);
+
+    const initialPayload: any = {
+      titulo: "Novo Documento",
+      tamanho_titulo: "18",
+      estilo_titulo: "negrito",
+      alinhamento_titulo: "center",
+      pasta_id: safePastaId,
+      conteudo: "<p><br></p>",
+      tamanho_conteudo: "16",
+      alinhamento_conteudo: "justify",
+      estilo_conteudo: "",
+      incluir_assinatura_programa_certo: true,
+      incluir_assinatura_cordenacao: true,
+      incluir_assinatura_aluno: false,
+      status: "emitido",
+      criado_em: now,
+      atualizado_em: now,
+    };
+    if (currentUserId) {
+      initialPayload.matricula_usuario = currentUserId;
+    }
+
+    let realDocId = `doc_${Date.now()}`;
+
+    if (supabase && isSupabaseConfigured) {
+      try {
+        const { data: inserted, error: insertErr } = await supabase
+          .from("documentos")
+          .insert(initialPayload)
+          .select()
+          .single();
+
+        if (!insertErr && inserted?.id) {
+          realDocId = String(inserted.id);
+        } else if (insertErr) {
+          console.error("Erro ao criar documento no Supabase:", insertErr);
+        }
+      } catch (e) {
+        console.error("Exceção ao inserir documento no Supabase:", e);
+      }
+    }
 
     const newDoc: DocumentItem = {
-      id: newId,
+      id: realDocId,
       id_usuario: currentUserId,
       matricula_usuario: currentUserId,
-      pasta_id: currentFolderId || null,
-      titulo: "",
+      pasta_id: safePastaId,
+      titulo: "Novo Documento",
       tamanho_titulo: 18,
       estilo_titulo: "negrito",
       alinhamento_titulo: "center",
-      conteudo: "",
+      conteudo: "<p><br></p>",
       tamanho_conteudo: 16,
       alinhamento_conteudo: "justify",
       estilo_conteudo: "",
@@ -1323,17 +1423,23 @@ export function DocumentosManager({
       atualizado_em: now,
     };
 
-    setDocuments((prev) => [newDoc, ...prev]);
-    setEditingDocId(newId);
-    setViewMode("google_docs_editor");
-    onEditorModeChange?.(true, newId);
+    setDocuments((prev) => [newDoc, ...prev.filter((d) => String(d.id) !== String(realDocId))]);
+    try {
+      localStorage.setItem(STORAGE_KEY_DOCS, JSON.stringify([newDoc, ...documents]));
+    } catch {}
 
+    setEditingDocId(realDocId);
+    setViewMode("google_docs_editor");
+    onEditorModeChange?.(true, realDocId);
+
+    const editUrl = `/documentos/editar/editar-documento/${realDocId}`;
     try {
       if (typeof window !== "undefined") {
-        window.history.pushState(null, "", `/documentos/editar-documento-${newId}`);
+        window.history.pushState(null, "", editUrl);
       }
     } catch {}
     scrollToTop();
+    setIsLoading(false);
   };
 
   // Abrir tela de criação de pasta
@@ -1440,10 +1546,21 @@ export function DocumentosManager({
             atualizado_em: now,
           };
 
+          const isNumericId = !isNaN(Number(editingDocId)) && Number(editingDocId) > 0;
           const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(editingDocId);
           let updateOk = false;
 
-          if (isUuid) {
+          if (isNumericId) {
+            const { data: updatedRows, error: updateErr } = await supabase
+              .from("documentos")
+              .update(updatePayload)
+              .eq("id", Number(editingDocId))
+              .select();
+
+            if (!updateErr && updatedRows && updatedRows.length > 0) {
+              updateOk = true;
+            }
+          } else if (isUuid) {
             const { data: updatedRows, error: updateErr } = await supabase
               .from("documentos")
               .update(updatePayload)
@@ -1689,10 +1806,23 @@ export function DocumentosManager({
           atualizado_em: now,
         };
 
+        const isNumericId = !isNaN(Number(updatedDoc.id)) && Number(updatedDoc.id) > 0;
         const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(updatedDoc.id);
         let updateOk = false;
 
-        if (isUuid) {
+        if (isNumericId) {
+          const { data: updatedRows, error: updateErr } = await supabase
+            .from("documentos")
+            .update(payload)
+            .eq("id", Number(updatedDoc.id))
+            .select();
+
+          if (!updateErr && updatedRows && updatedRows.length > 0) {
+            updateOk = true;
+          } else if (updateErr) {
+            console.warn("Aviso ao atualizar documento numérico no banco:", updateErr);
+          }
+        } else if (isUuid) {
           const { data: updatedRows, error: updateErr } = await supabase
             .from("documentos")
             .update(payload)
@@ -1701,6 +1831,8 @@ export function DocumentosManager({
 
           if (!updateErr && updatedRows && updatedRows.length > 0) {
             updateOk = true;
+          } else if (updateErr) {
+            console.warn("Aviso ao atualizar documento UUID no banco:", updateErr);
           }
         }
 
@@ -1715,6 +1847,11 @@ export function DocumentosManager({
 
           if (inserted?.id) {
             finalDocId = String(inserted.id);
+            try {
+              if (typeof window !== "undefined") {
+                window.history.pushState(null, "", `/documentos/editar/editar-documento/${finalDocId}`);
+              }
+            } catch {}
           } else if (insertErr) {
             console.error("Erro ao salvar documento no banco de dados:", insertErr);
           }
@@ -1722,7 +1859,9 @@ export function DocumentosManager({
       }
 
       const nextDocs = documents.map((d) =>
-        d.id === updatedDoc.id ? { ...updatedDoc, id: finalDocId, pasta_id: safePastaId, atualizado_em: now } : d
+        String(d.id) === String(updatedDoc.id)
+          ? { ...updatedDoc, id: finalDocId, pasta_id: safePastaId, atualizado_em: now }
+          : d
       );
       setDocuments(nextDocs);
       try {
@@ -1737,11 +1876,12 @@ export function DocumentosManager({
     }
   };
 
-  // Abrir documento diretamente em modo de edição Google Docs (/documentos/editar-documento-:id)
+  // Abrir documento diretamente em modo de edição Google Docs (/documentos/editar/editar-documento/:id)
   const handleEditDoc = (doc: DocumentItem) => {
-    const editUrl = `/documentos/editar-documento-${doc.id}`;
+    const editUrl = `/documentos/editar/editar-documento/${doc.id}`;
     setEditingDocId(doc.id);
     setViewMode("google_docs_editor");
+    onEditorModeChange?.(true, doc.id);
 
     try {
       if (typeof window !== "undefined") {
@@ -2254,10 +2394,11 @@ export function DocumentosManager({
       {/* TELA GOOGLE DOCS: PAINEL DE EDIÇÃO ESTILO GOOGLE DOCS COM CABEÇALHO FIXO   */}
       {/* ========================================================================= */}
       {viewMode === "google_docs_editor" && (() => {
-        const docToEdit = documents.find((d) => d.id === editingDocId);
+        const docToEdit = documents.find((d) => String(d.id) === String(editingDocId));
         if (docToEdit) {
           return (
             <GoogleDocsDocumentEditor
+              key={docToEdit.id}
               initialDoc={docToEdit}
               allFolders={folders}
               onSave={handleSaveGoogleDocsDoc}

@@ -484,7 +484,20 @@ export function GoogleDocsDocumentEditor({
   const handleSave = async () => {
     setIsSaving(true);
     try {
-      await onSave(currentDocItem);
+      // Coleta o HTML mais recente diretamente dos nós DOM das folhas para garantir 100% de precisão
+      const latestPagesHtml = pagesHtml.map((originalHtml, idx) => {
+        const el = editableRefs.current[idx];
+        return el ? el.innerHTML : originalHtml;
+      });
+      setPagesHtml(latestPagesHtml);
+      const latestConsolidated = joinPagesToContent(latestPagesHtml);
+
+      const docToSave: DocumentItem = {
+        ...currentDocItem,
+        conteudo: latestConsolidated,
+      };
+
+      await onSave(docToSave);
       setHasUnsavedChanges(false);
       const timeStr = new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
       setLastSavedTime(timeStr);
@@ -492,7 +505,7 @@ export function GoogleDocsDocumentEditor({
       setTimeout(() => setFeedbackToast(null), 3000);
     } catch (err) {
       console.error("Erro ao salvar documento:", err);
-      setFeedbackToast("Erro ao salvar documento.");
+      setFeedbackToast("Erro ao salvar documento no banco de dados.");
       setTimeout(() => setFeedbackToast(null), 4000);
     } finally {
       setIsSaving(false);
