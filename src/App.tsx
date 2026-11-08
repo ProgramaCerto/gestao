@@ -7423,7 +7423,9 @@ export default function App() {
           onWheel={(e) => e.stopPropagation()}
           onTouchMove={(e) => e.stopPropagation()}
           className={`flex-1 flex flex-col min-w-0 w-full h-full ${
-            isAnyModalOpen ? "overflow-hidden" : "overflow-y-auto overscroll-contain"
+            isAnyModalOpen || (activeTab === "documentos" && (routeEditingDocId || isEditingDocument))
+              ? "overflow-hidden"
+              : "overflow-y-auto overscroll-contain"
           }`}
         >
           {/* Top Bar para Telas Pequenas / Mobile */}

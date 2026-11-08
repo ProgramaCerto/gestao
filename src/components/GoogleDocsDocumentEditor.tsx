@@ -626,11 +626,13 @@ export function GoogleDocsDocumentEditor({
   const totalPagesCount = pages.length;
 
   return (
-    <div className="min-h-screen bg-[#eaedf1] text-zinc-900 flex flex-col font-sans select-text">
+    <div className="fixed inset-0 z-40 bg-[#eaedf1] text-zinc-900 flex flex-col font-sans select-text overflow-hidden h-screen w-screen">
       {/* ========================================================================= */}
-      {/* 1. BARRA SUPERIOR (HEADER RESPONSIVO COM IDENTIDADE GESTÃO CURSOS)        */}
+      {/* MENU SUPERIOR FIXO: CABEÇALHO + DEFINIÇÕES + ASSINATURAS (NÃO ROLA)       */}
       {/* ========================================================================= */}
-      <header className="sticky top-0 z-40 bg-white border-b border-zinc-200 px-3 sm:px-6 py-2.5 shadow-xs">
+      <div className="shrink-0 z-30 flex flex-col bg-white border-b border-zinc-200 select-none shadow-xs">
+        {/* 1. BARRA SUPERIOR (HEADER RESPONSIVO COM IDENTIDADE GESTÃO CURSOS)        */}
+        <header className="bg-white border-b border-zinc-200 px-3 sm:px-6 py-2.5">
         <div className="flex flex-wrap items-center justify-between gap-3 w-full">
           {/* BLOCO 1: Logo Gestão Cursos Programa Certo + Botão Voltar para Documentos */}
           <div className="flex items-center gap-2.5 sm:gap-3 shrink-0 flex-wrap">
@@ -758,11 +760,11 @@ export function GoogleDocsDocumentEditor({
         </div>
       </header>
 
-      {/* ========================================================================= */}
-      {/* 2. BARRA DE FERRAMENTAS (TOOLBAR: TÍTULO, DOCUMENTO, ADICIONAR PÁGINA)    */}
-      {/* ========================================================================= */}
-      <div className="sticky top-[80px] md:top-[53px] z-30 bg-[#f8fafc] border-b border-zinc-200 px-3 sm:px-6 py-2 shadow-2xs flex flex-col md:flex-row md:items-center md:justify-between gap-2.5">
-        <div className="flex items-center gap-2 sm:gap-4 flex-wrap">
+        {/* ========================================================================= */}
+        {/* 2. BARRA DE FERRAMENTAS (TOOLBAR: TÍTULO, DOCUMENTO, ADICIONAR PÁGINA)    */}
+        {/* ========================================================================= */}
+        <div className="bg-[#f8fafc] px-3 sm:px-6 py-2 flex flex-col md:flex-row md:items-center md:justify-between gap-2.5">
+          <div className="flex items-center gap-2 sm:gap-4 flex-wrap">
           {/* SEÇÃO 1: DEFINIÇÕES PARA TÍTULO */}
           <div className="flex items-center gap-1.5 p-1 bg-white rounded-xl border border-zinc-200 shadow-2xs flex-wrap">
             <span className="text-[10px] font-black uppercase tracking-wider text-[#0b439c] bg-blue-50 px-2 py-1 rounded-md border border-blue-200 select-none">
@@ -1142,6 +1144,7 @@ export function GoogleDocsDocumentEditor({
           </div>
         </div>
       </div>
+    </div>
 
       {/* Toast Feedback */}
       {feedbackToast && (
@@ -1152,11 +1155,11 @@ export function GoogleDocsDocumentEditor({
       )}
 
       {/* ========================================================================= */}
-      {/* 3. ÁREA DAS FOLHAS A4 (EDIÇÃO DIRETA COM CORTE DE PÁGINAS AUTOMÁTICO)     */}
+      {/* 3. ÁREA DAS FOLHAS A4 (ÚNICA PARTE QUE ROLA PARA CIMA E PARA BAIXO)       */}
       {/* ========================================================================= */}
       <main
         ref={containerRef}
-        className="flex-1 py-8 px-2 sm:px-6 flex flex-col items-center overflow-y-auto space-y-8 select-text"
+        className="flex-1 min-h-0 py-8 px-2 sm:px-6 flex flex-col items-center overflow-y-auto overscroll-contain space-y-8 select-text"
       >
         {pages.map((page, pIdx) => {
           const pageNumber = page.pageNumber;
