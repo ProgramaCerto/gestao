@@ -288,6 +288,7 @@ export default function App() {
   // Navigation: 'dashboard' | 'usuarios' | 'atendimento' | 'documentos' | 'ocorrencias' | 'notificacoes' | 'perfil' | 'termos' (restrita aos painéis administrativos)
   const [activeTab, setActiveTab] = useState<"dashboard" | "usuarios" | "atendimento" | "documentos" | "ocorrencias" | "notificacoes" | "perfil" | "termos" | "trilhas" | "courses" | "projects" | "lesson-view" | "cursos_gestao">(initialRoute.activeTab);
   const [routeEditingDocId, setRouteEditingDocId] = useState<string | null>(initialRoute.initialEditingDocId || null);
+  const [isEditingDocument, setIsEditingDocument] = useState<boolean>(Boolean(initialRoute.initialEditingDocId));
   const [autoOpenEditorInProjects, setAutoOpenEditorInProjects] = useState<boolean>(false);
   const [targetMatriculaForNotif, setTargetMatriculaForNotif] = useState<string>("");
 
@@ -2380,25 +2381,27 @@ export default function App() {
           for (const dbC of dbCursos) {
             const courseIdStr = String(dbC.id).startsWith("curso-db-") ? String(dbC.id) : `curso-db-${dbC.id}`;
             
-            // 1. Carrega da estrutura oficial: Aulas (aulas_cursos) e Partes (partes_aulas)
+            // 1. Carrega da estrutura oficial: Aulas (aulas_cursos e aulas_dos_cursos) e Partes (partes_aulas)
             let dbAulasCursos: any[] = [];
             try {
-              let acDataResult: any[] | null = null;
+              let acDataResult: any[] = [];
               const { data: acData } = await supabase
                 .from("aulas_cursos")
                 .select("*")
                 .eq("id_do_curso", dbC.id);
-              if (acData && acData.length > 0) {
+
+              const { data: adcData } = await supabase
+                .from("aulas_dos_cursos")
+                .select("*")
+                .eq("id_do_curso", dbC.id);
+
+              // Prioriza a tabela que tem as aulas cadastradas do curso (aulas_dos_cursos contém todas as aulas)
+              if (adcData && adcData.length > 0 && (!acData || adcData.length >= acData.length)) {
+                acDataResult = adcData;
+              } else if (acData && acData.length > 0) {
                 acDataResult = acData;
-              } else {
-                // Tenta carregar de aulas_dos_cursos se aulas_cursos não tiver ou não existir
-                const { data: adcData } = await supabase
-                  .from("aulas_dos_cursos")
-                  .select("*")
-                  .eq("id_do_curso", dbC.id);
-                if (adcData && adcData.length > 0) {
-                  acDataResult = adcData;
-                }
+              } else if (adcData && adcData.length > 0) {
+                acDataResult = adcData;
               }
 
               if (acDataResult && acDataResult.length > 0) {
@@ -2441,18 +2444,18 @@ export default function App() {
                 
                 // Partes estritamente pertencentes a esta aula específica
                 let aulaPartes: ParteAula[] = (dbPartesAulas || [])
-                  .filter((p: any) => Number(p.id_aula) === Number(ac.id))
+                  .filter((p: any) => Number(p.id_aula || p.id_da_aula) === Number(ac.id))
                   .sort((a: any, b: any) => (Number(a.numero_da_parte ?? a.numero_parte ?? a.id) || 0) - (Number(b.numero_da_parte ?? b.numero_parte ?? b.id) || 0));
 
-                // Se não há partes cadastradas na tabela partes_aulas para esta aula, mas ela possui conteúdo/teste diretamente na linha:
-                if (aulaPartes.length === 0 && (ac.conteudo || ac.nome_do_teste)) {
+                // Se não há partes cadastradas na tabela partes_aulas para esta aula, cria a parte inicial com o conteúdo da aula:
+                if (aulaPartes.length === 0) {
                   aulaPartes.push({
                     id: Number(ac.id) * 1000 + 1,
                     id_do_curso: Number(ac.id_do_curso || dbC.id),
                     id_aula: Number(ac.id),
                     numero_da_parte: 1,
-                    nome_da_parte: ac.nome_da_aula || aulaTitle,
-                    conteudo: ac.conteudo,
+                    nome_da_parte: ac.nome_da_parte || ac.nome_da_aula || aulaTitle,
+                    conteudo: ac.conteudo || "Conteúdo prático da aula disponível na plataforma.",
                     nome_do_teste: ac.nome_do_teste,
                     alternativa_a: ac.alternativa_a,
                     alternativa_b: ac.alternativa_b,
@@ -7222,7 +7225,7 @@ export default function App() {
         {/* Barra Lateral Fixa no Desktop (Camada com rolagem fluida e scrollbar fina) */}
         <aside
           className={`${
-            activeTab === "documentos" && routeEditingDocId
+            activeTab === "documentos" && (routeEditingDocId || isEditingDocument)
               ? "hidden"
               : "hidden md:flex md:w-[280px] lg:w-[300px]"
           } bg-white border-r border-zinc-200 flex-col shrink-0 h-full min-h-0 max-h-screen z-30`}
@@ -7424,7 +7427,7 @@ export default function App() {
           }`}
         >
           {/* Top Bar para Telas Pequenas / Mobile */}
-          <header className={`${activeTab === "documentos" && routeEditingDocId ? "hidden" : "md:hidden"} w-full bg-white border-b border-zinc-200 h-16 flex items-center justify-between px-4 sticky top-0 z-30 shrink-0 shadow-xs`}>
+          <header className={`${activeTab === "documentos" && (routeEditingDocId || isEditingDocument) ? "hidden" : "md:hidden"} w-full bg-white border-b border-zinc-200 h-16 flex items-center justify-between px-4 sticky top-0 z-30 shrink-0 shadow-xs`}>
             <div className="flex items-center gap-3">
               <button
                 type="button"
@@ -7459,7 +7462,7 @@ export default function App() {
 
 
           {/* Main Content Body */}
-          <main className={`flex-1 ${activeTab === "documentos" && routeEditingDocId ? "p-0" : "p-6 sm:p-8"}`}>
+          <main className={`flex-1 ${activeTab === "documentos" && (routeEditingDocId || isEditingDocument) ? "p-0" : "p-6 sm:p-8"}`}>
         
         {/* ==================== TAB 1: DASHBOARD ADMINISTRATIVO ==================== */}
         {activeTab === "dashboard" && (
@@ -12637,6 +12640,10 @@ export default function App() {
             currentAdminName={studentName}
             currentUserId={user?.user_metadata?.matricula || user?.id}
             routeEditingDocId={routeEditingDocId}
+            onEditorModeChange={(isEditing, docId) => {
+              setIsEditingDocument(isEditing);
+              setRouteEditingDocId(docId || null);
+            }}
           />
         )}
 

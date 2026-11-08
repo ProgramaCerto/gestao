@@ -95,7 +95,14 @@ export function isSameFolder(a: any, b: any): boolean {
 export function isDocumentOutsideFolder(pastaId: any): boolean {
   if (pastaId === null || pastaId === undefined) return true;
   const str = String(pastaId).trim();
-  return str === "" || str === "null" || str === "undefined";
+  return str === "" || str === "null" || str === "undefined" || str === "none";
+}
+
+export function cleanDbPastaId(val: any): string | null {
+  if (val === null || val === undefined) return null;
+  const s = String(val).trim();
+  if (s === "" || s === "null" || s === "undefined" || s === "none") return null;
+  return s;
 }
 
 export interface FormattedA4Page {
@@ -933,6 +940,7 @@ interface DocumentosManagerProps {
   currentAdminName?: string;
   currentUserId?: string;
   routeEditingDocId?: string | null;
+  onEditorModeChange?: (isEditing: boolean, docId?: string | null) => void;
 }
 
 export function DocumentosManager({
@@ -940,6 +948,7 @@ export function DocumentosManager({
   currentAdminName = "Administrador",
   currentUserId,
   routeEditingDocId,
+  onEditorModeChange,
 }: DocumentosManagerProps) {
   // Pastas e Documentos
   const [folders, setFolders] = useState<DocFolder[]>(() => {
@@ -1188,8 +1197,17 @@ export function DocumentosManager({
     if (routeEditingDocId) {
       setEditingDocId(routeEditingDocId);
       setViewMode("google_docs_editor");
+      onEditorModeChange?.(true, routeEditingDocId);
     }
-  }, [routeEditingDocId]);
+  }, [routeEditingDocId, onEditorModeChange]);
+
+  useEffect(() => {
+    if (viewMode === "google_docs_editor") {
+      onEditorModeChange?.(true, editingDocId);
+    } else {
+      onEditorModeChange?.(false, null);
+    }
+  }, [viewMode, editingDocId, onEditorModeChange]);
 
   // Formulário: Nova Pasta
   const [newFolderName, setNewFolderName] = useState("");
@@ -1261,27 +1279,43 @@ export function DocumentosManager({
     return documents.filter((d) => isSameFolder(d.pasta_id, fId)).length;
   };
 
-  // Abrir tela de criação de documento
+  // Abrir tela de criação de documento diretamente no editor Google Docs
   const handleOpenCreateDoc = () => {
-    setEditingDocId(null);
-    setDocTitulo("");
-    setDocPastaId(currentFolderId);
+    const newId = typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `doc_${Date.now()}`;
+    const now = new Date().toISOString();
 
-    const initialFolder = folders.find((f) => f.id === currentFolderId);
-    setFolderInputText(initialFolder ? initialFolder.nome : "");
-    setIsFolderDropdownOpen(false);
+    const newDoc: DocumentItem = {
+      id: newId,
+      id_usuario: currentUserId,
+      matricula_usuario: currentUserId,
+      pasta_id: currentFolderId || null,
+      titulo: "",
+      tamanho_titulo: 18,
+      estilo_titulo: "negrito",
+      alinhamento_titulo: "center",
+      conteudo: "",
+      tamanho_conteudo: 16,
+      alinhamento_conteudo: "justify",
+      estilo_conteudo: "",
+      incluir_assinatura_programa_certo: true,
+      incluir_assinatura_cordenacao: true,
+      incluir_campo_assinatura_aluno: false,
+      incluir_assinatura_aluno: false,
+      status: "emitido",
+      criado_em: now,
+      atualizado_em: now,
+    };
 
-    setDocConteudo("Declaramos para os devidos fins que o(a) estudante encontra-se regularmente matriculado(a) e ativo(a) na instituição Programa Certo.\n\nPor ser expressão da verdade, firmamos o presente documento.");
-    setDocTamanhoTitulo(18);
-    setDocEstiloTitulo("negrito");
-    setDocAlinhamentoTitulo("center");
-    setDocTamanhoConteudo(16);
-    setDocAlinhamentoConteudo("justify");
-    setDocEstiloConteudo("");
-    setIncluirAssinaturaProgramaCerto(true);
-    setIncluirAssinaturaCordenacao(true);
-    setIncluirCampoAssinaturaAluno(false);
-    setViewMode("create_doc");
+    setDocuments((prev) => [newDoc, ...prev]);
+    setEditingDocId(newId);
+    setViewMode("google_docs_editor");
+    onEditorModeChange?.(true, newId);
+
+    try {
+      if (typeof window !== "undefined") {
+        window.history.pushState(null, "", `/documentos/editar-documento-${newId}`);
+      }
+    } catch {}
     scrollToTop();
   };
 
@@ -1299,40 +1333,36 @@ export function DocumentosManager({
 
     setIsSaving(true);
     const now = new Date().toISOString();
-    let newFolderId = `f_${Date.now()}`;
+    let newFolderId = typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `f_${Date.now()}`;
 
     try {
       if (supabase && isSupabaseConfigured) {
-        let insertErr: any = null;
         let inserted: any = null;
 
         if (currentUserId) {
           const resMat = await supabase
             .from("pastas")
-            .insert({ id: newFolderId, nome: nomeLimpo, matricula_usuario: currentUserId })
+            .insert({ nome: nomeLimpo, matricula_usuario: currentUserId })
             .select()
             .single();
           if (!resMat.error && resMat.data) {
             inserted = resMat.data;
-            insertErr = null;
           }
         }
 
-        // Se falhou (por exemplo sem currentUserId), insere sem matricula_usuario
-        if (!inserted || insertErr) {
+        if (!inserted) {
           const resFallback = await supabase
             .from("pastas")
-            .insert({ id: newFolderId, nome: nomeLimpo })
+            .insert({ nome: nomeLimpo })
             .select()
             .single();
           if (!resFallback.error && resFallback.data) {
             inserted = resFallback.data;
-            insertErr = null;
           }
         }
 
         if (inserted?.id) {
-          newFolderId = inserted.id;
+          newFolderId = String(inserted.id);
         }
       }
 
@@ -1369,31 +1399,59 @@ export function DocumentosManager({
     setIsSaving(true);
     const now = new Date().toISOString();
 
+    const safePastaId = cleanDbPastaId(docPastaId);
+    let finalDocId = editingDocId;
+
     try {
       if (editingDocId) {
         // Atualizar no Supabase
         if (supabase && isSupabaseConfigured) {
-          const { error: updateErr } = await supabase
-            .from("documentos")
-            .update({
-              titulo: docTitulo.trim(),
-              tamanho_titulo: docTamanhoTitulo,
-              estilo_titulo: docEstiloTitulo,
-              alinhamento_titulo: docAlinhamentoTitulo,
-              pasta_id: docPastaId ? parseInt(String(docPastaId).replace(/\D/g, ""), 10) || null : null,
-              conteudo: docConteudo.trim(),
-              tamanho_conteudo: docTamanhoConteudo,
-              alinhamento_conteudo: docAlinhamentoConteudo,
-              estilo_conteudo: docEstiloConteudo.trim(),
-              incluir_assinatura_programa_certo: incluirAssinaturaProgramaCerto,
-              incluir_assinatura_cordenacao: incluirAssinaturaCordenacao,
-              incluir_assinatura_aluno: incluirCampoAssinaturaAluno,
-              atualizado_em: now,
-            })
-            .eq("id", editingDocId);
+          const updatePayload: any = {
+            titulo: docTitulo.trim(),
+            tamanho_titulo: docTamanhoTitulo,
+            estilo_titulo: docEstiloTitulo,
+            alinhamento_titulo: docAlinhamentoTitulo,
+            pasta_id: safePastaId,
+            conteudo: docConteudo.trim(),
+            tamanho_conteudo: docTamanhoConteudo,
+            alinhamento_conteudo: docAlinhamentoConteudo,
+            estilo_conteudo: docEstiloConteudo.trim(),
+            incluir_assinatura_programa_certo: incluirAssinaturaProgramaCerto,
+            incluir_assinatura_cordenacao: incluirAssinaturaCordenacao,
+            incluir_assinatura_aluno: incluirCampoAssinaturaAluno,
+            incluir_campo_assinatura_aluno: incluirCampoAssinaturaAluno,
+            atualizado_em: now,
+          };
 
-          if (updateErr) {
-            console.error("Erro ao atualizar documento no Supabase:", updateErr);
+          const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(editingDocId);
+          let updateOk = false;
+
+          if (isUuid) {
+            const { data: updatedRows, error: updateErr } = await supabase
+              .from("documentos")
+              .update(updatePayload)
+              .eq("id", editingDocId)
+              .select();
+
+            if (!updateErr && updatedRows && updatedRows.length > 0) {
+              updateOk = true;
+            }
+          }
+
+          if (!updateOk) {
+            if (currentUserId) updatePayload.matricula_usuario = currentUserId;
+            updatePayload.status = "emitido";
+            const { data: inserted, error: insertErr } = await supabase
+              .from("documentos")
+              .insert(updatePayload)
+              .select()
+              .single();
+
+            if (inserted?.id) {
+              finalDocId = String(inserted.id);
+            } else if (insertErr) {
+              console.error("Erro ao sincronizar documento com o banco:", insertErr);
+            }
           }
         }
 
@@ -1401,11 +1459,12 @@ export function DocumentosManager({
           d.id === editingDocId
             ? {
                 ...d,
+                id: finalDocId || d.id,
                 titulo: docTitulo.trim(),
                 tamanho_titulo: docTamanhoTitulo,
                 estilo_titulo: docEstiloTitulo,
                 alinhamento_titulo: docAlinhamentoTitulo,
-                pasta_id: docPastaId,
+                pasta_id: safePastaId,
                 conteudo: docConteudo.trim(),
                 tamanho_conteudo: docTamanhoConteudo,
                 alinhamento_conteudo: docAlinhamentoConteudo,
@@ -1423,7 +1482,7 @@ export function DocumentosManager({
         } catch {}
       } else {
         // Inserir no Supabase
-        let newDocId = `doc_${Date.now()}`;
+        let newDocId = typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `doc_${Date.now()}`;
         
         if (supabase && isSupabaseConfigured) {
           const payloadDoc: any = {
@@ -1431,7 +1490,7 @@ export function DocumentosManager({
             tamanho_titulo: docTamanhoTitulo,
             estilo_titulo: docEstiloTitulo,
             alinhamento_titulo: docAlinhamentoTitulo,
-            pasta_id: docPastaId ? parseInt(String(docPastaId).replace(/\D/g, ""), 10) || null : null,
+            pasta_id: safePastaId,
             conteudo: docConteudo.trim(),
             tamanho_conteudo: docTamanhoConteudo,
             alinhamento_conteudo: docAlinhamentoConteudo,
@@ -1439,6 +1498,7 @@ export function DocumentosManager({
             incluir_assinatura_programa_certo: incluirAssinaturaProgramaCerto,
             incluir_assinatura_cordenacao: incluirAssinaturaCordenacao,
             incluir_assinatura_aluno: incluirCampoAssinaturaAluno,
+            incluir_campo_assinatura_aluno: incluirCampoAssinaturaAluno,
             status: "emitido",
           };
           if (currentUserId) {
@@ -1503,29 +1563,27 @@ export function DocumentosManager({
 
     setIsSaving(true);
     const now = new Date().toISOString();
-    let newFolderId = `f_${Date.now()}`;
+    let newFolderId = typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `f_${Date.now()}`;
 
     try {
       if (supabase && isSupabaseConfigured) {
         let inserted: any = null;
-        let insertErr: any = null;
 
         if (currentUserId) {
           const resMat = await supabase
             .from("pastas")
-            .insert({ id: newFolderId, nome: newFolderName.trim(), matricula_usuario: currentUserId })
+            .insert({ nome: newFolderName.trim(), matricula_usuario: currentUserId })
             .select()
             .single();
           if (!resMat.error && resMat.data) {
             inserted = resMat.data;
-            insertErr = null;
           }
         }
 
-        if (!inserted || insertErr) {
+        if (!inserted) {
           const resFallback = await supabase
             .from("pastas")
-            .insert({ id: newFolderId, nome: newFolderName.trim() })
+            .insert({ nome: newFolderName.trim() })
             .select()
             .single();
           if (!resFallback.error && resFallback.data) {
@@ -1534,7 +1592,7 @@ export function DocumentosManager({
         }
 
         if (inserted?.id) {
-          newFolderId = inserted.id;
+          newFolderId = String(inserted.id);
         }
       }
 
@@ -1592,6 +1650,8 @@ export function DocumentosManager({
   const handleSaveGoogleDocsDoc = async (updatedDoc: DocumentItem) => {
     setIsSaving(true);
     const now = new Date().toISOString();
+    const safePastaId = cleanDbPastaId(updatedDoc.pasta_id);
+    let finalDocId = updatedDoc.id;
 
     try {
       if (supabase && isSupabaseConfigured) {
@@ -1600,7 +1660,7 @@ export function DocumentosManager({
           tamanho_titulo: updatedDoc.tamanho_titulo,
           estilo_titulo: updatedDoc.estilo_titulo,
           alinhamento_titulo: updatedDoc.alinhamento_titulo,
-          pasta_id: updatedDoc.pasta_id ? parseInt(String(updatedDoc.pasta_id).replace(/\D/g, ""), 10) || null : null,
+          pasta_id: safePastaId,
           conteudo: updatedDoc.conteudo, // Preserva exatamente todos os enters e quebras
           tamanho_conteudo: updatedDoc.tamanho_conteudo,
           alinhamento_conteudo: updatedDoc.alinhamento_conteudo,
@@ -1608,27 +1668,50 @@ export function DocumentosManager({
           incluir_assinatura_programa_certo: updatedDoc.incluir_assinatura_programa_certo,
           incluir_assinatura_cordenacao: updatedDoc.incluir_assinatura_cordenacao,
           incluir_assinatura_aluno: updatedDoc.incluir_campo_assinatura_aluno,
+          incluir_campo_assinatura_aluno: updatedDoc.incluir_campo_assinatura_aluno,
           atualizado_em: now,
         };
 
-        const { error: updateErr } = await supabase
-          .from("documentos")
-          .update(payload)
-          .eq("id", updatedDoc.id);
+        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(updatedDoc.id);
+        let updateOk = false;
 
-        if (updateErr) {
-          console.warn("Supabase update error:", updateErr.message || updateErr);
+        if (isUuid) {
+          const { data: updatedRows, error: updateErr } = await supabase
+            .from("documentos")
+            .update(payload)
+            .eq("id", updatedDoc.id)
+            .select();
+
+          if (!updateErr && updatedRows && updatedRows.length > 0) {
+            updateOk = true;
+          }
+        }
+
+        if (!updateOk) {
+          if (currentUserId) payload.matricula_usuario = currentUserId;
+          payload.status = updatedDoc.status || "emitido";
+          const { data: inserted, error: insertErr } = await supabase
+            .from("documentos")
+            .insert(payload)
+            .select()
+            .single();
+
+          if (inserted?.id) {
+            finalDocId = String(inserted.id);
+          } else if (insertErr) {
+            console.error("Erro ao salvar documento no banco de dados:", insertErr);
+          }
         }
       }
 
       const nextDocs = documents.map((d) =>
-        d.id === updatedDoc.id ? { ...updatedDoc, atualizado_em: now } : d
+        d.id === updatedDoc.id ? { ...updatedDoc, id: finalDocId, pasta_id: safePastaId, atualizado_em: now } : d
       );
       setDocuments(nextDocs);
       try {
         localStorage.setItem(STORAGE_KEY_DOCS, JSON.stringify(nextDocs));
       } catch {}
-      setSyncFeedback("Documento salvo com sucesso!");
+      setSyncFeedback("Documento salvo e sincronizado com o banco de dados!");
       setTimeout(() => setSyncFeedback(null), 3000);
     } catch (err) {
       console.error("Erro ao salvar documento:", err);
@@ -2357,7 +2440,10 @@ export function DocumentosManager({
                         }}
                         className="p-2 text-xs font-bold text-zinc-800 hover:bg-blue-50 cursor-pointer flex items-center justify-between"
                       >
-                        <span>📁 {f.nome}</span>
+                        <div className="flex items-center gap-1.5">
+                          <Folder className="w-3.5 h-3.5 text-[#0b439c]" />
+                          <span>{f.nome}</span>
+                        </div>
                         {docPastaId === f.id && <Check className="w-3.5 h-3.5 text-[#0b439c]" />}
                       </div>
                     ))}
@@ -2910,10 +2996,10 @@ export function DocumentosManager({
                 onChange={(e) => setTargetMoveFolder(e.target.value ? e.target.value : null)}
                 className="w-full px-3 py-2.5 rounded-xl border border-zinc-300 text-zinc-800 font-medium focus:outline-none focus:border-[#0b439c] bg-white cursor-pointer"
               >
-                <option value="">(Remover de pastas - Deixar fora da pasta)</option>
+                <option value="">Sem pasta (Deixar fora da pasta)</option>
                 {folders.map((f) => (
                   <option key={f.id} value={f.id}>
-                    📁 {f.nome}
+                    {f.nome}
                   </option>
                 ))}
               </select>

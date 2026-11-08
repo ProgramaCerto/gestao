@@ -16,7 +16,8 @@ import {
   Trash2,
   X,
   Plus,
-  Sparkles
+  Sparkles,
+  Folder
 } from "lucide-react";
 import { DocumentItem, DocFolder, parseFontSize } from "./DocumentosManager";
 import { LOGO_PROGRAMA_CERTO_BASE64 } from "../lib/logoBase64";
@@ -629,69 +630,85 @@ export function GoogleDocsDocumentEditor({
       {/* ========================================================================= */}
       {/* 1. BARRA SUPERIOR (HEADER RESPONSIVO COM IDENTIDADE GESTÃO CURSOS)        */}
       {/* ========================================================================= */}
-      <header className="sticky top-0 z-40 bg-white border-b border-zinc-200 px-3 sm:px-6 py-2.5 shadow-xs flex flex-col md:flex-row md:items-center md:justify-between gap-2.5 sm:gap-3">
-        {/* Linha 1 no Mobile: Logo + Voltar + Nome do Documento */}
-        <div className="flex items-center gap-2.5 sm:gap-3 min-w-0 w-full md:w-auto flex-1">
-          {/* Logo Gestão Cursos Programa Certo */}
-          <div className="flex items-center gap-2 select-none shrink-0">
-            <img
-              src={LOGO_PROGRAMA_CERTO_BASE64 || "/logo-programa-certo.png"}
-              alt="Logo Gestão Cursos Programa Certo"
-              className="w-8 h-8 object-contain rounded-lg border border-zinc-200/80 shadow-2xs"
-            />
-            <div className="flex flex-col">
-              <span className="font-black text-xs text-[#0b439c] leading-none">Gestão Cursos</span>
-              <span className="font-bold text-[9px] text-zinc-500 leading-none mt-0.5">Programa Certo</span>
+      <header className="sticky top-0 z-40 bg-white border-b border-zinc-200 px-3 sm:px-6 py-2.5 shadow-xs">
+        <div className="flex flex-wrap items-center justify-between gap-3 w-full">
+          {/* BLOCO 1: Logo Gestão Cursos Programa Certo + Botão Voltar para Documentos */}
+          <div className="flex items-center gap-2.5 sm:gap-3 shrink-0 flex-wrap">
+            <div className="flex items-center gap-2 select-none shrink-0">
+              <img
+                src={LOGO_PROGRAMA_CERTO_BASE64 || "/logo-programa-certo.png"}
+                alt="Logo Gestão Cursos Programa Certo"
+                className="w-8 h-8 object-contain rounded-lg border border-zinc-200/80 shadow-2xs"
+              />
+              <div className="flex flex-col">
+                <span className="font-black text-xs text-[#0b439c] leading-none">Gestão Cursos</span>
+                <span className="font-bold text-[9px] text-zinc-500 leading-none mt-0.5">Programa Certo</span>
+              </div>
             </div>
+
+            <div className="h-6 w-px bg-zinc-200 hidden sm:block shrink-0" />
+
+            {/* Botão com setinha de Voltar: "Voltar para Documentos" */}
+            <button
+              type="button"
+              onClick={handleBackAction}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-zinc-100 hover:bg-zinc-200 text-zinc-800 font-bold text-xs transition-colors cursor-pointer border border-zinc-200 shrink-0"
+              title="Voltar para a lista de Documentos"
+            >
+              <ArrowLeft className="w-4 h-4 text-[#0b439c]" />
+              <span>Voltar para Documentos</span>
+            </button>
           </div>
 
-          <div className="h-6 w-px bg-zinc-200 hidden sm:block shrink-0" />
-
-          {/* Botão com setinha de Voltar: "Voltar para Documentos" */}
-          <button
-            type="button"
-            onClick={handleBackAction}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-zinc-100 hover:bg-zinc-200 text-zinc-800 font-bold text-xs transition-colors cursor-pointer border border-zinc-200 shrink-0"
-            title="Voltar para a lista de Documentos"
-          >
-            <ArrowLeft className="w-4 h-4 text-[#0b439c]" />
-            <span className="hidden sm:inline">Voltar para Documentos</span>
-            <span className="sm:hidden">Voltar</span>
-          </button>
-
-          {/* Nome do Documento (Input editável inline no topo) */}
-          <div className="flex items-center gap-2 min-w-0 flex-1 max-w-md">
+          {/* BLOCO 2: Título do Documento + Pasta (quebra para baixo no celular para não ficar grudado) */}
+          <div className="flex items-center gap-2 flex-1 min-w-[240px] max-w-xl flex-wrap">
             <input
               type="text"
               value={docTitulo}
               onChange={(e) => setDocTitulo(e.target.value)}
               placeholder="Nome do documento..."
-              className="w-full text-xs sm:text-sm font-black text-zinc-900 bg-transparent hover:bg-zinc-50 focus:bg-white focus:ring-2 focus:ring-blue-500/30 px-2 py-1 rounded-lg border border-transparent hover:border-zinc-300 focus:border-[#0b439c] outline-none transition-all truncate"
+              className="flex-1 min-w-[160px] text-xs sm:text-sm font-black text-zinc-900 bg-transparent hover:bg-zinc-50 focus:bg-white focus:ring-2 focus:ring-blue-500/30 px-2 py-1 rounded-lg border border-transparent hover:border-zinc-300 focus:border-[#0b439c] outline-none transition-all truncate"
               title="Clique para alterar o nome do documento"
             />
+
+            {/* Seletor de Pasta sem emoji e sem a palavra raiz */}
+            <div className="flex items-center gap-1.5 px-2.5 py-1 bg-zinc-100 hover:bg-zinc-200/80 rounded-xl border border-zinc-200 text-xs font-semibold shrink-0 transition-colors">
+              <Folder className="w-3.5 h-3.5 text-[#0b439c] shrink-0" />
+              <select
+                value={docPastaId || ""}
+                onChange={(e) => setDocPastaId(e.target.value || null)}
+                className="bg-transparent border-0 outline-none text-zinc-700 text-xs font-bold cursor-pointer pr-1"
+                title="Pasta onde este documento está alocado"
+              >
+                <option value="">Sem pasta</option>
+                {allFolders.map((f) => (
+                  <option key={f.id} value={f.id}>
+                    {f.nome}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
 
-          {/* Status de Salvamento no Desktop */}
-          <div className="hidden xl:flex items-center gap-1.5 text-xs font-semibold shrink-0">
-            {isSaving ? (
-              <span className="text-amber-600 flex items-center gap-1">
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                Salvando...
-              </span>
-            ) : hasUnsavedChanges ? (
-              <span className="text-zinc-400">Alterações pendentes</span>
-            ) : (
-              <span className="text-emerald-700 flex items-center gap-1">
-                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                {lastSavedTime ? `Salvo às ${lastSavedTime}` : "Salvo"}
-              </span>
-            )}
-          </div>
-        </div>
+          {/* BLOCO 3: Botões de Ação (quebra suavemente se a tela for estreita) */}
+          <div className="flex items-center gap-2 flex-wrap shrink-0">
+            {/* Status de Salvamento */}
+            <div className="hidden xl:flex items-center gap-1.5 text-xs font-semibold shrink-0">
+              {isSaving ? (
+                <span className="text-amber-600 flex items-center gap-1">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  Salvando...
+                </span>
+              ) : hasUnsavedChanges ? (
+                <span className="text-zinc-400">Alterações pendentes</span>
+              ) : (
+                <span className="text-emerald-700 flex items-center gap-1">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                  {lastSavedTime ? `Salvo às ${lastSavedTime}` : "Salvo"}
+                </span>
+              )}
+            </div>
 
-        {/* Linha 2 no Mobile (muda para baixo com espaço limpo): Ações */}
-        <div className="flex items-center gap-2 justify-between sm:justify-end w-full md:w-auto shrink-0 pt-1.5 md:pt-0 border-t border-zinc-100 md:border-0 flex-wrap sm:flex-nowrap">
-          <div className="flex items-center gap-1.5">
             <button
               type="button"
               onClick={() => openDocumentPdfInBrowser(currentDocItem)}
@@ -699,7 +716,7 @@ export function GoogleDocsDocumentEditor({
               title="Abrir PDF na Web"
             >
               <ExternalLink className="w-3.5 h-3.5 text-[#0b439c]" />
-              <span className="hidden sm:inline">Abrir na Web</span>
+              <span>Abrir na Web</span>
             </button>
 
             <button
@@ -709,11 +726,9 @@ export function GoogleDocsDocumentEditor({
               title="Imprimir documento oficial"
             >
               <Printer className="w-3.5 h-3.5 text-zinc-700" />
-              <span className="hidden sm:inline">Imprimir</span>
+              <span>Imprimir</span>
             </button>
-          </div>
 
-          <div className="flex items-center gap-1.5 ml-auto sm:ml-0">
             <button
               type="button"
               onClick={handleSave}
@@ -942,19 +957,8 @@ export function GoogleDocsDocumentEditor({
           </div>
         </div>
 
-        {/* SEÇÃO 3: ADICIONAR PÁGINA NO CABEÇALHO & ASSINATURAS */}
+        {/* SEÇÃO 3: CONFIGURAÇÃO DE ASSINATURAS */}
         <div className="flex items-center gap-2 flex-wrap">
-          {/* Adicionar Página aqui no cabeçalho conforme solicitado */}
-          <button
-            type="button"
-            onClick={handleAddNewPage}
-            className="px-2.5 py-1.5 bg-white hover:bg-zinc-50 text-zinc-800 border border-zinc-200 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs"
-            title="Adicionar uma nova página A4 ao documento"
-          >
-            <Plus className="w-3.5 h-3.5 text-[#0b439c]" />
-            <span>Adicionar Página</span>
-          </button>
-
           {/* BOTÃO DE ASSINATURAS EM PÁGINAS COM POPOVER ABRINDO PARA A DIREITA */}
           <div className="relative">
             <button
@@ -1374,14 +1378,14 @@ export function GoogleDocsDocumentEditor({
         })}
 
         {/* ÚNICO BOTÃO DE ADICIONAR NOVA FOLHA: EXCLUSIVAMENTE NO FINAL DO DOCUMENTO */}
-        <div className="w-full max-w-[794px] flex justify-center py-4 select-none">
+        <div className="w-full max-w-[794px] flex justify-center py-6 select-none">
           <button
             type="button"
             onClick={handleAddNewPage}
-            className="flex items-center gap-2 px-5 py-2.5 bg-white hover:bg-zinc-50 text-[#0b439c] font-black text-xs rounded-xl border border-zinc-300 shadow-sm hover:shadow-md transition-all cursor-pointer"
+            className="flex items-center gap-2 px-6 py-3 bg-white hover:bg-blue-50/60 text-[#0b439c] font-black text-xs sm:text-sm rounded-2xl border-2 border-dashed border-blue-200 hover:border-[#0b439c] shadow-xs hover:shadow-md transition-all cursor-pointer"
           >
-            <Plus className="w-4 h-4" />
-            <span>Adicionar Próxima Folha A4 (Página {totalPagesCount + 1})</span>
+            <Plus className="w-4 h-4 text-[#0b439c]" />
+            <span>Adicionar próxima folha, página {totalPagesCount + 1}</span>
           </button>
         </div>
       </main>
