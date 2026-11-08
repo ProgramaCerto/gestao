@@ -174,6 +174,8 @@ function getInitialRouteInfo() {
   let detailTicketProtocol = "";
   let initialUserMatricula = "";
 
+  let initialEditingDocId = "";
+
   const segments = raw.split("/").filter(Boolean);
   if (segments.length > 0) {
     const first = segments[0];
@@ -183,6 +185,15 @@ function getInitialRouteInfo() {
       activeTab = "termos";
     } else if (first === "documentos" || first === "documento" || first === "docs") {
       activeTab = "documentos";
+      if (segments.length >= 2 && segments[1].startsWith("editar-documento-")) {
+        initialEditingDocId = segments[1].replace(/^editar-documento-/, "");
+      } else if (segments.length >= 2 && segments[1].startsWith("editar-o-documento-")) {
+        initialEditingDocId = segments[1].replace(/^editar-o-documento-/, "");
+      } else if (segments.length >= 4 && segments[1] === "editar" && segments[2] === "editar-documento") {
+        initialEditingDocId = segments[3];
+      } else if (segments.length >= 3 && segments[1] === "editar") {
+        initialEditingDocId = segments[2];
+      }
     } else if (first === "ocorrencias" || first === "ocorrencia" || first.startsWith("ocorrencias-") || first.startsWith("ocorrencia-") || first === "seguranca") {
       activeTab = "ocorrencias";
     } else if (first === "notificacoes" || first === "notificacao" || first.startsWith("notificacoes-") || first.startsWith("notificacao-") || first === "comunicados" || first === "avisos") {
@@ -260,7 +271,7 @@ function getInitialRouteInfo() {
     }
   }
 
-  return { authMode, activeTab, courseSlug, lessonSlug, isViewingCourseInfo, pdfProtocol, detailTicketProtocol, initialUserMatricula };
+  return { authMode, activeTab, courseSlug, lessonSlug, isViewingCourseInfo, pdfProtocol, detailTicketProtocol, initialUserMatricula, initialEditingDocId };
 }
 
 export default function App() {
@@ -276,6 +287,7 @@ export default function App() {
 
   // Navigation: 'dashboard' | 'usuarios' | 'atendimento' | 'documentos' | 'ocorrencias' | 'notificacoes' | 'perfil' | 'termos' (restrita aos painéis administrativos)
   const [activeTab, setActiveTab] = useState<"dashboard" | "usuarios" | "atendimento" | "documentos" | "ocorrencias" | "notificacoes" | "perfil" | "termos" | "trilhas" | "courses" | "projects" | "lesson-view" | "cursos_gestao">(initialRoute.activeTab);
+  const [routeEditingDocId, setRouteEditingDocId] = useState<string | null>(initialRoute.initialEditingDocId || null);
   const [autoOpenEditorInProjects, setAutoOpenEditorInProjects] = useState<boolean>(false);
   const [targetMatriculaForNotif, setTargetMatriculaForNotif] = useState<string>("");
 
@@ -1561,7 +1573,10 @@ export default function App() {
       }
       return "/atendimento";
     }
-    if (activeTab === "documentos") return "/documentos";
+    if (activeTab === "documentos") {
+      if (routeEditingDocId) return `/documentos/editar-documento-${routeEditingDocId}`;
+      return "/documentos";
+    }
     if (activeTab === "ocorrencias") return "/ocorrencias";
     if (activeTab === "notificacoes") return "/notificacoes";
     if (activeTab === "usuarios") {
@@ -1735,8 +1750,20 @@ export default function App() {
       setEditingUser(null);
       return;
     }
-    if (clean === "documentos" || clean === "documento" || clean === "docs") {
+    if (clean === "documentos" || clean === "documento" || clean === "docs" || clean.startsWith("documentos/") || clean.startsWith("documentos-")) {
       setActiveTab("documentos");
+      const docSegs = clean.split("/").filter(Boolean);
+      if (docSegs.length >= 2 && docSegs[1].startsWith("editar-documento-")) {
+        setRouteEditingDocId(docSegs[1].replace(/^editar-documento-/, ""));
+      } else if (docSegs.length >= 2 && docSegs[1].startsWith("editar-o-documento-")) {
+        setRouteEditingDocId(docSegs[1].replace(/^editar-o-documento-/, ""));
+      } else if (docSegs.length >= 4 && docSegs[1] === "editar" && docSegs[2] === "editar-documento") {
+        setRouteEditingDocId(docSegs[3]);
+      } else if (docSegs.length >= 3 && docSegs[1] === "editar") {
+        setRouteEditingDocId(docSegs[2]);
+      } else {
+        setRouteEditingDocId(null);
+      }
       return;
     }
     if (clean === "ocorrencias" || clean === "ocorrencia" || clean.startsWith("ocorrencias-") || clean.startsWith("ocorrencia-") || clean.startsWith("ocorrencias/") || clean === "seguranca") {
@@ -7194,7 +7221,11 @@ export default function App() {
       >
         {/* Barra Lateral Fixa no Desktop (Camada com rolagem fluida e scrollbar fina) */}
         <aside
-          className="hidden md:flex md:w-[280px] lg:w-[300px] bg-white border-r border-zinc-200 flex-col shrink-0 h-full min-h-0 max-h-screen z-30"
+          className={`${
+            activeTab === "documentos" && routeEditingDocId
+              ? "hidden"
+              : "hidden md:flex md:w-[280px] lg:w-[300px]"
+          } bg-white border-r border-zinc-200 flex-col shrink-0 h-full min-h-0 max-h-screen z-30`}
         >
             {/* Topo da Barra Lateral: Logo Gestão Cursos Programa Certo (Apenas visual, não clicável) */}
             <div className="p-5 border-b border-zinc-200 flex items-center gap-3 bg-zinc-50/70 select-none cursor-default shrink-0">
@@ -7393,7 +7424,7 @@ export default function App() {
           }`}
         >
           {/* Top Bar para Telas Pequenas / Mobile */}
-          <header className="md:hidden w-full bg-white border-b border-zinc-200 h-16 flex items-center justify-between px-4 sticky top-0 z-30 shrink-0 shadow-xs">
+          <header className={`${activeTab === "documentos" && routeEditingDocId ? "hidden" : "md:hidden"} w-full bg-white border-b border-zinc-200 h-16 flex items-center justify-between px-4 sticky top-0 z-30 shrink-0 shadow-xs`}>
             <div className="flex items-center gap-3">
               <button
                 type="button"
@@ -7428,7 +7459,7 @@ export default function App() {
 
 
           {/* Main Content Body */}
-          <main className="flex-1 p-6 sm:p-8">
+          <main className={`flex-1 ${activeTab === "documentos" && routeEditingDocId ? "p-0" : "p-6 sm:p-8"}`}>
         
         {/* ==================== TAB 1: DASHBOARD ADMINISTRATIVO ==================== */}
         {activeTab === "dashboard" && (
@@ -12601,7 +12632,12 @@ export default function App() {
         })()}
 
         {activeTab === "documentos" && (
-          <DocumentosManager allUsers={allUsers} currentAdminName={studentName} currentUserId={user?.user_metadata?.matricula || user?.id} />
+          <DocumentosManager
+            allUsers={allUsers}
+            currentAdminName={studentName}
+            currentUserId={user?.user_metadata?.matricula || user?.id}
+            routeEditingDocId={routeEditingDocId}
+          />
         )}
 
         {activeTab === "ocorrencias" && (

@@ -41,6 +41,7 @@ import {
 import { supabase, isSupabaseConfigured } from "../lib/supabase";
 import { LOGO_PROGRAMA_CERTO_BASE64 } from "../lib/logoBase64";
 import { openDocumentPdfInBrowser, printDocumentInBrowser } from "../lib/generateDocumentPdf";
+import { GoogleDocsDocumentEditor } from "./GoogleDocsDocumentEditor";
 
 export interface DocFolder {
   id: string;
@@ -68,6 +69,9 @@ export interface DocumentItem {
   incluir_assinatura_cordenacao: boolean;
   incluir_campo_assinatura_aluno: boolean;
   incluir_assinatura_aluno?: boolean;
+  paginas_assinatura_programa_certo?: string; // "ultima" ou "1, 4, 6"
+  paginas_assinatura_cordenacao?: string; // "ultima" ou "2"
+  paginas_assinatura_aluno?: string; // "ultima"
   status: "rascunho" | "emitido" | "arquivado";
   criado_em: string;
   atualizado_em: string;
@@ -292,6 +296,9 @@ export function SulfiteDocumentSheet({
   incluirAssinaturaProgramaCerto,
   incluirAssinaturaCordenacao,
   incluirCampoAssinaturaAluno,
+  paginasAssinaturaProgramaCerto,
+  paginasAssinaturaCordenacao,
+  paginasAssinaturaAluno,
   dataCriacao,
 }: {
   titulo: string;
@@ -305,6 +312,9 @@ export function SulfiteDocumentSheet({
   incluirAssinaturaProgramaCerto?: boolean;
   incluirAssinaturaCordenacao?: boolean;
   incluirCampoAssinaturaAluno?: boolean;
+  paginasAssinaturaProgramaCerto?: string;
+  paginasAssinaturaCordenacao?: string;
+  paginasAssinaturaAluno?: string;
   dataCriacao?: string;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -434,10 +444,10 @@ export function SulfiteDocumentSheet({
                         />
                         <div className="flex flex-col justify-center">
                           <h1 className="text-lg font-black text-zinc-900 leading-none">
-                            Programa <span className="text-[#0b439c]">Certo</span>
+                            Gestão <span className="text-[#0b439c]">Cursos</span>
                           </h1>
-                          <span className="text-[9px] font-extrabold uppercase tracking-wider text-zinc-400 mt-0.5">
-                            Plataforma Educacional
+                          <span className="text-[10px] font-extrabold uppercase tracking-wider text-zinc-500 mt-0.5">
+                            Programa Certo
                           </span>
                         </div>
                       </div>
@@ -486,55 +496,72 @@ export function SulfiteDocumentSheet({
 
                   {/* PARTE INFERIOR DA FOLHA */}
                   <div className="mt-auto pt-4 shrink-0">
-                    {/* 4. HOMOLOGAÇÃO E ASSINATURAS (SOMENTE SE HOUVER ALGUMA MARCADA E NA FOLHA DESIGNADA) */}
-                    {page.hasSignaturesOnThisPage && hasAnySignature && (
-                      <div className="border border-zinc-300 rounded-xl p-4 bg-white mb-5 shadow-2xs">
-                        <div className="text-[9px] font-black uppercase tracking-wider text-zinc-400 mb-5">
-                          HOMOLOGAÇÃO E ASSINATURAS INSTITUCIONAIS
-                        </div>
+                    {/* 4. HOMOLOGAÇÃO E ASSINATURAS (CONFORME PÁGINAS CONFIGURADAS) */}
+                    {(() => {
+                      const isSignOnPage = (rule: string | undefined) => {
+                        if (!rule || rule.trim().toLowerCase() === "ultima" || rule.trim().toLowerCase() === "última") {
+                          return page.isLastPage;
+                        }
+                        const nums = rule.split(/[,\s]+/).map((n) => parseInt(n.trim(), 10)).filter((n) => !isNaN(n));
+                        if (nums.length === 0) return page.isLastPage;
+                        return nums.includes(page.pageNumber);
+                      };
 
-                        <div className="flex items-end justify-between gap-6 w-full">
-                          {/* Assinatura Programa Certo */}
-                          {incluirAssinaturaProgramaCerto && (
-                            <div className="flex-1 min-w-0 text-center flex flex-col items-center">
-                              <div className="flex items-center justify-center gap-1.5 mb-2">
-                                <img
-                                  src={LOGO_PROGRAMA_CERTO_BASE64}
-                                  alt="Logo Gestão Cursos Programa Certo"
-                                  className="w-5 h-5 rounded object-contain shrink-0"
-                                />
-                                <span className="text-xs font-black text-zinc-900 truncate">
-                                  Programa <span className="text-[#0b439c]">Certo</span>
-                                </span>
+                      const hasPc = !!incluirAssinaturaProgramaCerto && isSignOnPage(paginasAssinaturaProgramaCerto);
+                      const hasCoord = !!incluirAssinaturaCordenacao && isSignOnPage(paginasAssinaturaCordenacao);
+                      const hasAluno = !!incluirCampoAssinaturaAluno && isSignOnPage(paginasAssinaturaAluno);
+
+                      if (!hasPc && !hasCoord && !hasAluno) return null;
+
+                      return (
+                        <div className="border border-zinc-300 rounded-xl p-4 bg-white mb-5 shadow-2xs">
+                          <div className="text-[9px] font-black uppercase tracking-wider text-zinc-400 mb-5">
+                            HOMOLOGAÇÃO E ASSINATURAS INSTITUCIONAIS
+                          </div>
+
+                          <div className="flex items-end justify-between gap-6 w-full">
+                            {/* Assinatura Programa Certo */}
+                            {hasPc && (
+                              <div className="flex-1 min-w-0 text-center flex flex-col items-center">
+                                <div className="flex items-center justify-center gap-1.5 mb-2">
+                                  <img
+                                    src={LOGO_PROGRAMA_CERTO_BASE64}
+                                    alt="Logo Gestão Cursos Programa Certo"
+                                    className="w-5 h-5 rounded object-contain shrink-0"
+                                  />
+                                  <span className="text-xs font-black text-zinc-900 truncate">
+                                    Programa <span className="text-[#0b439c]">Certo</span>
+                                  </span>
+                                </div>
+                                <div className="w-full border-t border-zinc-800 mb-1.5" />
+                                <div className="text-xs font-extrabold text-zinc-900 truncate w-full">Gestor Responsável</div>
+                                <div className="text-[10px] text-zinc-500 truncate w-full">Administração Programa Certo</div>
                               </div>
-                              <div className="w-full border-t border-zinc-800 mb-1.5" />
-                              <div className="text-xs font-extrabold text-zinc-900 truncate w-full">Gestor Responsável</div>
-                              <div className="text-[10px] text-zinc-500 truncate w-full">Administração Programa Certo</div>
-                            </div>
-                          )}
+                            )}
 
-                          {/* Assinatura Coordenação */}
-                          {incluirAssinaturaCordenacao && (
-                            <div className="flex-1 min-w-0 text-center flex flex-col items-center">
-                              <div className="h-7" />
-                              <div className="w-full border-t border-zinc-800 mb-1.5" />
-                              <div className="text-xs font-extrabold text-zinc-900 truncate w-full">Data: ____ / ____ / ________</div>
-                              <div className="text-[10px] text-zinc-500 truncate w-full">Visto da Coordenação</div>
-                            </div>
-                          )}
+                            {/* Assinatura Coordenação */}
+                            {hasCoord && (
+                              <div className="flex-1 min-w-0 text-center flex flex-col items-center">
+                                <div className="h-7" />
+                                <div className="w-full border-t border-zinc-800 mb-1.5" />
+                                <div className="text-xs font-extrabold text-zinc-900 truncate w-full">Data: ____ / ____ / ________</div>
+                                <div className="text-[10px] text-zinc-500 truncate w-full">Visto da Coordenação</div>
+                              </div>
+                            )}
 
-                          {/* Assinatura Aluno */}
-                          {incluirCampoAssinaturaAluno && (
-                            <div className="flex-1 min-w-0 text-center flex flex-col items-center">
-                              <div className="h-7" />
-                              <div className="w-full border-t border-zinc-800 mb-1.5" />
-                              <div className="text-xs font-extrabold text-zinc-900 truncate w-full">Assinatura do Aluno</div>
-                              <div className="text-[10px] text-zinc-500 truncate w-full">Estudante / Responsável Legal</div>
-                            </div>
-                          )}
+                            {/* Assinatura Aluno */}
+                            {hasAluno && (
+                              <div className="flex-1 min-w-0 text-center flex flex-col items-center">
+                                <div className="h-7" />
+                                <div className="w-full border-t border-zinc-800 mb-1.5" />
+                                <div className="text-xs font-extrabold text-zinc-900 truncate w-full">Assinatura do Aluno</div>
+                                <div className="text-[10px] text-zinc-500 truncate w-full">Estudante / Responsável Legal</div>
+                              </div>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    )}
+                      );
+                    })()}
 
                     {/* 5. RODAPÉ OFICIAL DA FOLHA COM NUMERAÇÃO DE PÁGINA */}
                     <div className="border-t border-zinc-200 pt-2.5 flex items-center justify-between text-[10px] text-zinc-400 font-medium">
@@ -905,9 +932,15 @@ interface DocumentosManagerProps {
   allUsers?: any[];
   currentAdminName?: string;
   currentUserId?: string;
+  routeEditingDocId?: string | null;
 }
 
-export function DocumentosManager({ allUsers = [], currentAdminName = "Administrador", currentUserId }: DocumentosManagerProps) {
+export function DocumentosManager({
+  allUsers = [],
+  currentAdminName = "Administrador",
+  currentUserId,
+  routeEditingDocId,
+}: DocumentosManagerProps) {
   // Pastas e Documentos
   const [folders, setFolders] = useState<DocFolder[]>(() => {
     try {
@@ -1034,8 +1067,17 @@ export function DocumentosManager({ allUsers = [], currentAdminName = "Administr
     fetchSupabaseData();
   }, [fetchSupabaseData]);
 
-  // Modo de exibição: "list" | "create_doc" | "create_folder" | "view_doc"
-  const [viewMode, setViewMode] = useState<"list" | "create_doc" | "create_folder" | "view_doc">("list");
+  // Modo de exibição: "list" | "create_doc" | "create_folder" | "view_doc" | "google_docs_editor"
+  const [viewMode, setViewMode] = useState<"list" | "create_doc" | "create_folder" | "view_doc" | "google_docs_editor">(() => {
+    if (typeof window !== "undefined") {
+      const pathname = window.location.pathname.replace(/^\/+|\/+$/g, "").trim().toLowerCase();
+      const parts = pathname.split("/").filter(Boolean);
+      if (parts[0] === "documentos" && (parts[1]?.startsWith("editar-documento-") || parts[1]?.startsWith("editar-o-documento-") || (parts[1] === "editar" && parts[2] === "editar-documento"))) {
+        return "google_docs_editor";
+      }
+    }
+    return "list";
+  });
   
   // Pasta em que o usuário está navegando (null = fora das pastas / visão principal)
   const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
@@ -1120,7 +1162,34 @@ export function DocumentosManager({ allUsers = [], currentAdminName = "Administr
   const [incluirAssinaturaProgramaCerto, setIncluirAssinaturaProgramaCerto] = useState(true);
   const [incluirAssinaturaCordenacao, setIncluirAssinaturaCordenacao] = useState(true);
   const [incluirCampoAssinaturaAluno, setIncluirCampoAssinaturaAluno] = useState(false);
-  const [editingDocId, setEditingDocId] = useState<string | null>(null);
+  const [editingDocId, setEditingDocId] = useState<string | null>(() => {
+    if (routeEditingDocId) return routeEditingDocId;
+    if (typeof window !== "undefined") {
+      const pathname = window.location.pathname.replace(/^\/+|\/+$/g, "").trim().toLowerCase();
+      const parts = pathname.split("/").filter(Boolean);
+      if (parts[0] === "documentos" && parts[1]?.startsWith("editar-documento-")) {
+        return parts[1].replace(/^editar-documento-/, "") || null;
+      }
+      if (parts[0] === "documentos" && parts[1]?.startsWith("editar-o-documento-")) {
+        return parts[1].replace(/^editar-o-documento-/, "") || null;
+      }
+      if (parts.length >= 4 && parts[0] === "documentos" && parts[1] === "editar" && parts[2] === "editar-documento") {
+        return parts[3] || null;
+      }
+      if (parts.length >= 3 && parts[0] === "documentos" && parts[1] === "editar") {
+        return parts[2] || null;
+      }
+    }
+    return null;
+  });
+
+  // Sincroniza se o routeEditingDocId mudar externamente
+  useEffect(() => {
+    if (routeEditingDocId) {
+      setEditingDocId(routeEditingDocId);
+      setViewMode("google_docs_editor");
+    }
+  }, [routeEditingDocId]);
 
   // Formulário: Nova Pasta
   const [newFolderName, setNewFolderName] = useState("");
@@ -1519,10 +1588,66 @@ export function DocumentosManager({ allUsers = [], currentAdminName = "Administr
     scrollToTop();
   };
 
-  // Abrir documento diretamente em modo de edição (lapisinho)
+  // Salvar documento vindo do GoogleDocsDocumentEditor
+  const handleSaveGoogleDocsDoc = async (updatedDoc: DocumentItem) => {
+    setIsSaving(true);
+    const now = new Date().toISOString();
+
+    try {
+      if (supabase && isSupabaseConfigured) {
+        const payload: any = {
+          titulo: updatedDoc.titulo,
+          tamanho_titulo: updatedDoc.tamanho_titulo,
+          estilo_titulo: updatedDoc.estilo_titulo,
+          alinhamento_titulo: updatedDoc.alinhamento_titulo,
+          pasta_id: updatedDoc.pasta_id ? parseInt(String(updatedDoc.pasta_id).replace(/\D/g, ""), 10) || null : null,
+          conteudo: updatedDoc.conteudo, // Preserva exatamente todos os enters e quebras
+          tamanho_conteudo: updatedDoc.tamanho_conteudo,
+          alinhamento_conteudo: updatedDoc.alinhamento_conteudo,
+          estilo_conteudo: updatedDoc.estilo_conteudo,
+          incluir_assinatura_programa_certo: updatedDoc.incluir_assinatura_programa_certo,
+          incluir_assinatura_cordenacao: updatedDoc.incluir_assinatura_cordenacao,
+          incluir_assinatura_aluno: updatedDoc.incluir_campo_assinatura_aluno,
+          atualizado_em: now,
+        };
+
+        const { error: updateErr } = await supabase
+          .from("documentos")
+          .update(payload)
+          .eq("id", updatedDoc.id);
+
+        if (updateErr) {
+          console.warn("Supabase update error:", updateErr.message || updateErr);
+        }
+      }
+
+      const nextDocs = documents.map((d) =>
+        d.id === updatedDoc.id ? { ...updatedDoc, atualizado_em: now } : d
+      );
+      setDocuments(nextDocs);
+      try {
+        localStorage.setItem(STORAGE_KEY_DOCS, JSON.stringify(nextDocs));
+      } catch {}
+      setSyncFeedback("Documento salvo com sucesso!");
+      setTimeout(() => setSyncFeedback(null), 3000);
+    } catch (err) {
+      console.error("Erro ao salvar documento:", err);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // Abrir documento diretamente em modo de edição Google Docs (/documentos/editar-documento-:id)
   const handleEditDoc = (doc: DocumentItem) => {
-    handleOpenDocView(doc);
-    setViewDocTab("edit");
+    const editUrl = `/documentos/editar-documento-${doc.id}`;
+    setEditingDocId(doc.id);
+    setViewMode("google_docs_editor");
+
+    try {
+      if (typeof window !== "undefined") {
+        window.history.pushState(null, "", editUrl);
+      }
+    } catch {}
   };
 
   // Duplicar documento selecionado
@@ -1990,6 +2115,72 @@ export function DocumentosManager({ allUsers = [], currentAdminName = "Administr
           </form>
         </div>
       )}
+
+      {/* ========================================================================= */}
+      {/* TELA GOOGLE DOCS: PAINEL DE EDIÇÃO ESTILO GOOGLE DOCS COM CABEÇALHO FIXO   */}
+      {/* ========================================================================= */}
+      {viewMode === "google_docs_editor" && (() => {
+        const docToEdit = documents.find((d) => d.id === editingDocId);
+        if (docToEdit) {
+          return (
+            <GoogleDocsDocumentEditor
+              initialDoc={docToEdit}
+              allFolders={folders}
+              onSave={handleSaveGoogleDocsDoc}
+              onBack={() => {
+                if (typeof window !== "undefined" && window.opener && !window.opener.closed) {
+                  window.close();
+                } else {
+                  if (typeof window !== "undefined") {
+                    window.history.pushState(null, "", "/documentos");
+                  }
+                  setEditingDocId(null);
+                  setViewMode("list");
+                  scrollToTop();
+                }
+              }}
+              onDelete={(docId) => {
+                setDeleteConfirmation({
+                  isOpen: true,
+                  type: "document",
+                  targetId: docId,
+                  title: docToEdit.titulo,
+                });
+              }}
+            />
+          );
+        }
+
+        if (isLoading) {
+          return (
+            <div className="min-h-screen bg-[#eaedf1] flex flex-col items-center justify-center p-6 text-zinc-600 gap-3">
+              <Loader2 className="w-8 h-8 text-[#0b439c] animate-spin" />
+              <span className="text-sm font-bold">Carregando documento para edição...</span>
+            </div>
+          );
+        }
+
+        return (
+          <div className="min-h-screen bg-[#eaedf1] flex flex-col items-center justify-center p-6 text-zinc-600 gap-4">
+            <AlertTriangle className="w-10 h-10 text-amber-500" />
+            <h2 className="text-lg font-black text-zinc-800">Documento não encontrado</h2>
+            <p className="text-xs text-zinc-500">O documento não foi localizado ou ainda está sincronizando com o banco.</p>
+            <button
+              type="button"
+              onClick={() => {
+                if (typeof window !== "undefined") {
+                  window.history.pushState(null, "", "/documentos");
+                }
+                setEditingDocId(null);
+                setViewMode("list");
+              }}
+              className="px-4 py-2 bg-[#0b439c] text-white rounded-xl text-xs font-bold hover:bg-blue-800 cursor-pointer"
+            >
+              Voltar para Documentos
+            </button>
+          </div>
+        );
+      })()}
 
       {/* ========================================================================= */}
       {/* TELA C: VISUALIZAÇÃO E EDIÇÃO DO DOCUMENTO                                */}
@@ -2549,7 +2740,7 @@ export function DocumentosManager({ allUsers = [], currentAdminName = "Administr
                   return (
                     <div
                       key={doc.id}
-                      onClick={() => handleOpenDocView(doc)}
+                      onClick={() => handleEditDoc(doc)}
                       className={`px-6 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-blue-50/40 transition-colors cursor-pointer ${
                         isSelected ? "bg-blue-50/60" : ""
                       }`}

@@ -51,18 +51,15 @@ export function buildDocumentPdfDoc(docItem: DocumentItem): any {
       doc.roundedRect(margin, curY, 14, 14, 3, 3, "F");
     }
 
-    doc.setFontSize(15);
-    doc.setTextColor(24, 24, 27);
-    doc.setFont("helvetica", "bold");
-    doc.text("Programa ", margin + 17, curY + 6);
-    const textWidthProg = doc.getTextWidth("Programa ");
+    doc.setFontSize(14);
     doc.setTextColor(11, 67, 156);
-    doc.text("Certo", margin + 17 + textWidthProg, curY + 6);
+    doc.setFont("helvetica", "bold");
+    doc.text("Gestão Cursos", margin + 17, curY + 6);
 
     doc.setFontSize(8.5);
     doc.setTextColor(100, 116, 139);
     doc.setFont("helvetica", "bold");
-    doc.text("PLATAFORMA EDUCACIONAL", margin + 17, curY + 11.5);
+    doc.text("PROGRAMA CERTO", margin + 17, curY + 11.5);
 
     // Lado Direito: Badge Oficial
     doc.setFillColor(238, 242, 255);
@@ -168,6 +165,16 @@ export function buildDocumentPdfDoc(docItem: DocumentItem): any {
     const rawPara = paragraphs[pIdx];
     const pageLimit = hasAnySignature ? maxContentY - 45 : maxContentY - 8;
 
+    // Quebra de página explícita da folha A4 (\f)
+    if (rawPara.includes("\f")) {
+      y = addNewDocPage();
+      y += 6;
+      doc.setFontSize(contentFontSize);
+      doc.setFont("helvetica", defaultFontStyle);
+      doc.setTextColor(39, 39, 42);
+      continue;
+    }
+
     // Linha em branco (espaçamento intencional / enters sucessivos)
     if (rawPara === "") {
       if (y + contentLineHeight > pageLimit) {
@@ -211,44 +218,59 @@ export function buildDocumentPdfDoc(docItem: DocumentItem): any {
 
   y += 4;
 
-  // 4. Caixa de Homologação e Assinaturas (Apenas se o documento tiver alguma assinatura selecionada)
-  if (hasAnySignature) {
-    const signBoxHeight = 35;
-    const bottomAnchoredSignY = footerY - signBoxHeight - 6; // Posicionada no final da folha, acima do rodapé oficial
-
-    // Se o conteúdo ultrapassou o espaço antes da caixa ancorada no final, cria nova página para as assinaturas
-    if (y > bottomAnchoredSignY) {
-      y = addNewDocPage();
+  // 4. Caixa de Homologação e Assinaturas (Em cada página que tiver assinaturas configuradas)
+  const isSignOnPage = (rule: string | undefined, pNum: number, totalP: number) => {
+    if (!rule || rule.trim().toLowerCase() === "ultima" || rule.trim().toLowerCase() === "última") {
+      return pNum === totalP;
     }
-    // Posiciona a caixa de assinaturas sempre no final da página (acima do rodapé oficial)
-    y = Math.max(y, bottomAnchoredSignY);
+    const nums = rule
+      .split(/[,\s]+/)
+      .map((n) => parseInt(n.trim(), 10))
+      .filter((n) => !isNaN(n));
+    if (nums.length === 0) return pNum === totalP;
+    return nums.includes(pNum);
+  };
+
+  const totalPagesEstimate = pageNumbers.length;
+  pageNumbers.forEach((pNum) => {
+    doc.setPage(pNum);
+
+    const hasPc =
+      !!docItem.incluir_assinatura_programa_certo &&
+      isSignOnPage(docItem.paginas_assinatura_programa_certo, pNum, totalPagesEstimate);
+    const hasCoord =
+      !!docItem.incluir_assinatura_cordenacao &&
+      isSignOnPage(docItem.paginas_assinatura_cordenacao, pNum, totalPagesEstimate);
+    const hasAluno =
+      !!(docItem.incluir_campo_assinatura_aluno || (docItem as any).incluir_assinatura_aluno) &&
+      isSignOnPage(docItem.paginas_assinatura_aluno, pNum, totalPagesEstimate);
+
+    const activeCount = [hasPc, hasCoord, hasAluno].filter(Boolean).length;
+    if (activeCount === 0) return;
+
+    const signBoxHeight = 35;
+    const signY = footerY - signBoxHeight - 6;
 
     doc.setFillColor(255, 255, 255);
     doc.setDrawColor(203, 213, 225);
     doc.setLineWidth(0.4);
-    doc.roundedRect(margin, y, contentWidth, signBoxHeight, 3, 3, "FD");
+    doc.roundedRect(margin, signY, contentWidth, signBoxHeight, 3, 3, "FD");
 
     doc.setFontSize(7.5);
     doc.setFont("helvetica", "bold");
     doc.setTextColor(100, 116, 139);
-    doc.text("HOMOLOGAÇÃO E ASSINATURAS INSTITUCIONAIS", margin + 6, y + 6);
+    doc.text("HOMOLOGAÇÃO E ASSINATURAS INSTITUCIONAIS", margin + 6, signY + 6);
 
-    const activeSigsCount = [
-      docItem.incluir_assinatura_programa_certo,
-      docItem.incluir_assinatura_cordenacao,
-      docItem.incluir_campo_assinatura_aluno || (docItem as any).incluir_assinatura_aluno
-    ].filter(Boolean).length || 1;
-
-    const colWidth = contentWidth / activeSigsCount;
+    const colWidth = contentWidth / activeCount;
     let curColX = margin;
-    const lineY = y + 25.5;
+    const lineY = signY + 25.5;
 
     // Assinatura 1: Programa Certo
-    if (docItem.incluir_assinatura_programa_certo) {
+    if (hasPc) {
       const centerX = curColX + colWidth / 2;
       const stampIconSize = 8;
       const stampIconX = centerX - stampIconSize / 2;
-      const stampIconY = y + 9.5;
+      const stampIconY = signY + 9.5;
 
       try {
         doc.addImage(LOGO_PROGRAMA_CERTO_BASE64, "PNG", stampIconX, stampIconY, stampIconSize, stampIconSize);
@@ -289,7 +311,7 @@ export function buildDocumentPdfDoc(docItem: DocumentItem): any {
     }
 
     // Assinatura 2: Coordenação
-    if (docItem.incluir_assinatura_cordenacao) {
+    if (hasCoord) {
       const centerX = curColX + colWidth / 2;
 
       doc.setDrawColor(24, 24, 27);
@@ -310,7 +332,7 @@ export function buildDocumentPdfDoc(docItem: DocumentItem): any {
     }
 
     // Assinatura 3: Aluno
-    if (docItem.incluir_campo_assinatura_aluno || (docItem as any).incluir_assinatura_aluno) {
+    if (hasAluno) {
       const centerX = curColX + colWidth / 2;
 
       doc.setDrawColor(24, 24, 27);
@@ -329,7 +351,7 @@ export function buildDocumentPdfDoc(docItem: DocumentItem): any {
 
       curColX += colWidth;
     }
-  }
+  });
 
   // 5. Rodapé Oficial no Final de Todas as Páginas
   const totalPages = pageNumbers.length;
@@ -343,7 +365,7 @@ export function buildDocumentPdfDoc(docItem: DocumentItem): any {
     doc.setFontSize(7);
     doc.setFont("helvetica", "bold");
     doc.setTextColor(71, 85, 105);
-    doc.text("Programa Certo — Plataforma Educacional", margin, footerY + 4.5);
+    doc.text("Gestão Cursos Programa Certo", margin, footerY + 4.5);
 
     doc.setFontSize(6.5);
     doc.setFont("helvetica", "normal");
