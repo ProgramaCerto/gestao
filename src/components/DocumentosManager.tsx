@@ -250,6 +250,16 @@ export function RenderFormattedContent({
   estiloConteudo?: string;
   className?: string;
 }) {
+  // Se o conteúdo for código HTML, renderiza diretamente formatado
+  if (content && content.includes("<") && content.includes(">")) {
+    return (
+      <div
+        className={`prose max-w-none text-inherit ${className || ""}`}
+        dangerouslySetInnerHTML={{ __html: content }}
+      />
+    );
+  }
+
   const isAllBold = (estiloConteudo || "").trim().toLowerCase() === "tudo" || (estiloConteudo || "").trim().toLowerCase() === "todo";
   if (isAllBold) {
     return <span className={`font-black ${className || ""}`}>{content}</span>;

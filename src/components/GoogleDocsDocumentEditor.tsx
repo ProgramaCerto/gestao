@@ -18,7 +18,8 @@ import {
   Plus,
   Sparkles,
   Folder,
-  Download
+  Download,
+  RotateCcw
 } from "lucide-react";
 import { DocumentItem, DocFolder, parseFontSize } from "./DocumentosManager";
 import { LOGO_PROGRAMA_CERTO_BASE64 } from "../lib/logoBase64";
@@ -30,6 +31,74 @@ export interface GoogleDocsDocumentEditorProps {
   onSave: (updatedDoc: DocumentItem) => Promise<void>;
   onBack: () => void;
   onDelete?: (docId: string) => void;
+}
+
+export const PAGE_BREAK_MARKER = "<!-- PAGE_BREAK -->";
+
+/**
+ * Escapa caracteres HTML para conversão segura de legado
+ */
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+/**
+ * Converte texto simples legado para blocos de HTML preservando quebras de linha e enters
+ */
+function convertPlainTextToHtml(plain: string): string {
+  if (!plain) return "<p><br></p>";
+  const lines = plain.split("\n");
+  const paragraphs = lines.map((line) => {
+    if (!line.trim()) return "<p><br></p>";
+    return `<p class="doc-text">${escapeHtml(line)}</p>`;
+  });
+  return paragraphs.join("") || "<p><br></p>";
+}
+
+/**
+ * Divide o conteúdo do documento (HTML ou legado) em páginas para edição
+ */
+export function parseInitialPages(content: string | undefined): string[] {
+  if (!content || !content.trim()) {
+    return ["<p><br></p>"];
+  }
+
+  // Divisão oficial por marcador PAGE_BREAK
+  if (content.includes(PAGE_BREAK_MARKER)) {
+    const parts = content.split(PAGE_BREAK_MARKER);
+    return parts.map((p) => p.trim() || "<p><br></p>");
+  }
+
+  // Suporte a marcador legado \f (form feed)
+  if (content.includes("\f")) {
+    const parts = content.split("\f");
+    return parts.map((p) => {
+      if (/<(p|h[1-6]|div|br)[^>]*>/i.test(p)) {
+        return p.trim() || "<p><br></p>";
+      }
+      return convertPlainTextToHtml(p);
+    });
+  }
+
+  // Se já contém tags HTML
+  if (/<(p|h[1-6]|div|br|span)[^>]*>/i.test(content)) {
+    return [content];
+  }
+
+  // Se é texto legado sem tags
+  return [convertPlainTextToHtml(content)];
+}
+
+/**
+ * Junta as páginas HTML em um único documento persistido no Supabase
+ */
+export function joinPagesToContent(pages: string[]): string {
+  return pages.join(PAGE_BREAK_MARKER);
 }
 
 // Verifica se uma assinatura deve aparecer em determinada página (1-indexed)
@@ -92,152 +161,6 @@ export function getActiveSignaturesForPage(
   };
 }
 
-export interface PageSlice {
-  pageNumber: number;
-  text: string;
-  maxLines: number;
-  usedLines: number;
-  isFirstPage: boolean;
-  isLastPage: boolean;
-  signatures: {
-    hasProgramaCerto: boolean;
-    hasCordenacao: boolean;
-    hasAluno: boolean;
-    hasAny: boolean;
-    count: number;
-  };
-}
-
-/**
- * Motor de paginação automática A4 baseado na capacidade física da folha e tamanho da fonte.
- * Cada página suporta uma quantidade estrita de linhas. Se o texto ultrapassar, corta e passa para a próxima folha.
- */
-export function paginateDocument(
-  fullText: string,
-  docTamanhoConteudo: number,
-  docTamanhoTitulo: number,
-  docTitulo: string,
-  exibirTituloNoDoc: boolean,
-  docItem: {
-    incluir_assinatura_programa_certo?: boolean;
-    paginas_assinatura_programa_certo?: string;
-    incluir_assinatura_cordenacao?: boolean;
-    paginas_assinatura_cordenacao?: string;
-    incluir_campo_assinatura_aluno?: boolean;
-    incluir_assinatura_aluno?: boolean;
-    paginas_assinatura_aluno?: string;
-  },
-  minPages: number = 1
-): PageSlice[] {
-  const contentLineHeight = Math.max(16, docTamanhoConteudo * 1.6);
-  // Quantidade de caracteres que cabem por linha na folha A4 (largura útil ~670px)
-  const charsPerLine = Math.max(20, Math.floor(670 / (docTamanhoConteudo * 0.54)));
-
-  // Altura ocupada pelo título na Página 1
-  const titleCharsPerLine = Math.max(15, Math.floor(670 / (docTamanhoTitulo * 0.58)));
-  const titleLines = exibirTituloNoDoc
-    ? Math.max(1, Math.ceil(((docTitulo || " ").trim().length || 1) / titleCharsPerLine))
-    : 0;
-  const titleHeight = exibirTituloNoDoc ? (titleLines * docTamanhoTitulo * 1.35) + 32 : 0;
-
-  // Altura útil padrão de uma folha A4 (1123px total - margens - cabeçalho - rodapé)
-  const BASE_USABLE_H = 880;
-  const SIGN_BOX_HEIGHT = 150;
-
-  const getMaxLinesForPage = (pageNum: number, totalPagesEst: number) => {
-    const sigs = getActiveSignaturesForPage(docItem, pageNum, totalPagesEst);
-    let usableH = BASE_USABLE_H;
-    if (pageNum === 1) {
-      usableH -= titleHeight;
-    }
-    if (sigs.hasAny) {
-      usableH -= SIGN_BOX_HEIGHT;
-    }
-    return Math.max(3, Math.floor(usableH / contentLineHeight));
-  };
-
-  // Se o texto tiver quebras manuais de formulário \f, respeitamos
-  const sections = fullText.split(/\f/);
-  const buckets: { paragraphs: string[]; maxLines: number; usedLines: number }[] = [];
-
-  sections.forEach((section) => {
-    const rawParagraphs = section.split("\n");
-    let curPageIndex = buckets.length;
-    let maxLines = getMaxLinesForPage(curPageIndex + 1, curPageIndex + 1);
-    buckets.push({ paragraphs: [], maxLines, usedLines: 0 });
-
-    for (let i = 0; i < rawParagraphs.length; i++) {
-      const para = rawParagraphs[i];
-      // Linha em branco (Enter avulso) ocupa exatamente 1 linha física
-      const paraLines = para === "" ? 1 : Math.max(1, Math.ceil(para.length / charsPerLine));
-
-      let currentBucket = buckets[curPageIndex];
-      currentBucket.maxLines = getMaxLinesForPage(curPageIndex + 1, curPageIndex + 1);
-
-      if (currentBucket.usedLines + paraLines <= currentBucket.maxLines) {
-        currentBucket.paragraphs.push(para);
-        currentBucket.usedLines += paraLines;
-      } else {
-        // Não cabe inteiro na folha atual
-        const remainingLines = currentBucket.maxLines - currentBucket.usedLines;
-
-        // Se o parágrafo for longo e puder ser fatiado entre páginas
-        if (remainingLines >= 1 && para.length > charsPerLine && para !== "") {
-          const splitChars = remainingLines * charsPerLine;
-          let breakIdx = para.lastIndexOf(" ", splitChars);
-          if (breakIdx <= splitChars * 0.4) breakIdx = splitChars;
-          const p1 = para.slice(0, breakIdx).trimEnd();
-          const p2 = para.slice(breakIdx).trimStart();
-
-          currentBucket.paragraphs.push(p1);
-          currentBucket.usedLines += Math.max(1, Math.ceil(p1.length / charsPerLine));
-
-          curPageIndex++;
-          maxLines = getMaxLinesForPage(curPageIndex + 1, curPageIndex + 1);
-          const p2Lines = Math.max(1, Math.ceil(p2.length / charsPerLine));
-          buckets.push({ paragraphs: [p2], maxLines, usedLines: p2Lines });
-        } else {
-          // Se já tem conteúdo na folha, avança para a próxima folha
-          if (currentBucket.paragraphs.length > 0) {
-            curPageIndex++;
-            maxLines = getMaxLinesForPage(curPageIndex + 1, curPageIndex + 1);
-            buckets.push({ paragraphs: [para], maxLines, usedLines: paraLines });
-          } else {
-            // Se a folha estiver vazia, adiciona mesmo que exceda
-            currentBucket.paragraphs.push(para);
-            currentBucket.usedLines += paraLines;
-          }
-        }
-      }
-    }
-  });
-
-  // Garante o número mínimo de páginas solicitadas pelo usuário
-  while (buckets.length < minPages) {
-    const nextIdx = buckets.length;
-    buckets.push({
-      paragraphs: [""],
-      maxLines: getMaxLinesForPage(nextIdx + 1, nextIdx + 1),
-      usedLines: 0,
-    });
-  }
-
-  const totalPages = buckets.length;
-  return buckets.map((bucket, idx) => {
-    const pageNumber = idx + 1;
-    const sigs = getActiveSignaturesForPage(docItem, pageNumber, totalPages);
-    return {
-      pageNumber,
-      text: bucket.paragraphs.join("\n"),
-      maxLines: bucket.maxLines,
-      usedLines: bucket.usedLines,
-      isFirstPage: idx === 0,
-      isLastPage: idx === totalPages - 1,
-      signatures: sigs,
-    };
-  });
-}
-
 export function GoogleDocsDocumentEditor({
   initialDoc,
   allFolders,
@@ -245,19 +168,19 @@ export function GoogleDocsDocumentEditor({
   onBack,
   onDelete,
 }: GoogleDocsDocumentEditorProps) {
-  // Estado do Documento
-  const [docTitulo, setDocTitulo] = useState(initialDoc.titulo || "Documento sem título");
+  // 1. Estado do Documento: O Nome do Documento é PERMANENTE e NÃO muda ao formatar títulos no corpo!
+  const [docTitulo, setDocTitulo] = useState<string>(initialDoc.titulo || "Documento sem título");
   const [docPastaId, setDocPastaId] = useState<string | null>(initialDoc.pasta_id || null);
 
-  // Texto consolidado do documento
-  const [docConteudo, setDocConteudo] = useState<string>(initialDoc.conteudo ?? "");
-  const [minPagesCount, setMinPagesCount] = useState<number>(() => {
-    const raw = initialDoc.conteudo ?? "";
-    const fParts = raw.split(/\f/).length;
-    return Math.max(1, fParts);
-  });
+  // 2. Páginas em HTML (cada página representa uma folha A4 com código HTML estruturado)
+  const [pagesHtml, setPagesHtml] = useState<string[]>(() => parseInitialPages(initialDoc.conteudo));
+  const [activePageIndex, setActivePageIndex] = useState<number>(0);
 
-  // Definições de Título
+  // 3. Detecção de seleção ativa para alternar dinamicamente o botão de Título:
+  // "Mudar texto selecionado para o tipo título" <-> "Mudar texto selecionado para não título"
+  const [isCurrentSelectionTitle, setIsCurrentSelectionTitle] = useState<boolean>(false);
+
+  // 4. Definições de Estilo de Título
   const [docTamanhoTitulo, setDocTamanhoTitulo] = useState<number>(
     parseFontSize(initialDoc.tamanho_titulo, 18)
   );
@@ -267,11 +190,10 @@ export function GoogleDocsDocumentEditor({
   const [docAlinhamentoTitulo, setDocAlinhamentoTitulo] = useState<"center" | "left" | "right">(
     initialDoc.alinhamento_titulo || "center"
   );
-  const [exibirTituloNoDoc, setExibirTituloNoDoc] = useState(true);
 
-  // Definições de Conteúdo
+  // 5. Definições de Estilo de Documento / Conteúdo
   const [docTamanhoConteudo, setDocTamanhoConteudo] = useState<number>(
-    parseFontSize(initialDoc.tamanho_conteudo, 16)
+    parseFontSize(initialDoc.tamanho_conteudo, 15)
   );
   const [docAlinhamentoConteudo, setDocAlinhamentoConteudo] = useState<
     "justify" | "left" | "center" | "right"
@@ -280,7 +202,7 @@ export function GoogleDocsDocumentEditor({
     initialDoc.estilo_conteudo || ""
   );
 
-  // Assinaturas e suas Páginas
+  // 6. Assinaturas e suas Páginas
   const [incluirAssinaturaProgramaCerto, setIncluirAssinaturaProgramaCerto] = useState<boolean>(
     initialDoc.incluir_assinatura_programa_certo !== false
   );
@@ -302,81 +224,19 @@ export function GoogleDocsDocumentEditor({
     initialDoc.paginas_assinatura_aluno || "ultima"
   );
 
-  // Modal / Popover de Assinaturas (agora abrindo para a direita)
+  // 7. Popover de Assinaturas (abrindo para a direita/interior)
   const [isSignaturesPanelOpen, setIsSignaturesPanelOpen] = useState(false);
 
-  // Status de salvamento e feedback
+  // 8. Status de salvamento e feedback
   const [isSaving, setIsSaving] = useState(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [lastSavedTime, setLastSavedTime] = useState<string | null>(null);
   const [feedbackToast, setFeedbackToast] = useState<string | null>(null);
 
-  // Página ativa e referências
-  const [activePageIndex, setActivePageIndex] = useState<number>(0);
-  const textareaRefs = useRef<(HTMLTextAreaElement | null)[]>([]);
+  // Referências aos editores de conteúdo HTML de cada página
+  const editableRefs = useRef<(HTMLDivElement | null)[]>([]);
   const containerRef = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState<number>(1);
-
-  // Cálculo da altura de linha e capacidade por caractere
-  const contentLineHeight = useMemo(() => {
-    return Math.max(16, docTamanhoConteudo * 1.6);
-  }, [docTamanhoConteudo]);
-
-  // Paginação automática A4 rigorosa respeitando o limite físico de cada folha
-  const pages: PageSlice[] = useMemo(() => {
-    return paginateDocument(
-      docConteudo,
-      docTamanhoConteudo,
-      docTamanhoTitulo,
-      docTitulo,
-      exibirTituloNoDoc,
-      {
-        incluir_assinatura_programa_certo: incluirAssinaturaProgramaCerto,
-        paginas_assinatura_programa_certo: paginasProgramaCerto,
-        incluir_assinatura_cordenacao: incluirAssinaturaCordenacao,
-        paginas_assinatura_cordenacao: paginasCordenacao,
-        incluir_campo_assinatura_aluno: incluirAssinaturaAluno,
-        incluir_assinatura_aluno: incluirAssinaturaAluno,
-        paginas_assinatura_aluno: paginasAluno,
-      },
-      minPagesCount
-    );
-  }, [
-    docConteudo,
-    docTamanhoConteudo,
-    docTamanhoTitulo,
-    docTitulo,
-    exibirTituloNoDoc,
-    incluirAssinaturaProgramaCerto,
-    paginasProgramaCerto,
-    incluirAssinaturaCordenacao,
-    paginasCordenacao,
-    incluirAssinaturaAluno,
-    paginasAluno,
-    minPagesCount,
-  ]);
-
-  // Rastreia modificações
-  useEffect(() => {
-    setHasUnsavedChanges(true);
-  }, [
-    docTitulo,
-    docPastaId,
-    docConteudo,
-    docTamanhoTitulo,
-    docEstiloTitulo,
-    docAlinhamentoTitulo,
-    exibirTituloNoDoc,
-    docTamanhoConteudo,
-    docAlinhamentoConteudo,
-    docEstiloConteudo,
-    incluirAssinaturaProgramaCerto,
-    paginasProgramaCerto,
-    incluirAssinaturaCordenacao,
-    paginasCordenacao,
-    incluirAssinaturaAluno,
-    paginasAluno,
-  ]);
 
   // Sincroniza escala com largura da janela (794px padrão de folha A4)
   useEffect(() => {
@@ -392,7 +252,69 @@ export function GoogleDocsDocumentEditor({
     return () => window.removeEventListener("resize", updateScale);
   }, []);
 
-  // Objeto do Documento atualizado
+  // Monitora alterações do cursor e da seleção para atualizar o estado dinâmico do botão de Título
+  const checkSelectionIsTitle = useCallback(() => {
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) {
+      setIsCurrentSelectionTitle(false);
+      return;
+    }
+
+    let node: Node | null = sel.anchorNode;
+    let insideTitle = false;
+
+    while (node && node !== document.body) {
+      if (node.nodeType === Node.ELEMENT_NODE) {
+        const el = node as HTMLElement;
+        const tag = el.tagName.toUpperCase();
+        if (tag === "H1" || tag === "H2" || tag === "H3" || tag === "H4" || el.classList.contains("doc-title")) {
+          insideTitle = true;
+          break;
+        }
+        if (el.getAttribute("contenteditable") === "true") {
+          break;
+        }
+      }
+      node = node.parentNode;
+    }
+
+    setIsCurrentSelectionTitle(insideTitle);
+  }, []);
+
+  useEffect(() => {
+    document.addEventListener("selectionchange", checkSelectionIsTitle);
+    return () => {
+      document.removeEventListener("selectionchange", checkSelectionIsTitle);
+    };
+  }, [checkSelectionIsTitle]);
+
+  // Rastreia modificações não salvas
+  useEffect(() => {
+    setHasUnsavedChanges(true);
+  }, [
+    docTitulo,
+    docPastaId,
+    pagesHtml,
+    docTamanhoTitulo,
+    docEstiloTitulo,
+    docAlinhamentoTitulo,
+    docTamanhoConteudo,
+    docAlinhamentoConteudo,
+    docEstiloConteudo,
+    incluirAssinaturaProgramaCerto,
+    paginasProgramaCerto,
+    incluirAssinaturaCordenacao,
+    paginasCordenacao,
+    incluirAssinaturaAluno,
+    paginasAluno,
+  ]);
+
+  // Conteúdo HTML consolidado
+  const consolidatedHtml = useMemo(() => {
+    return joinPagesToContent(pagesHtml);
+  }, [pagesHtml]);
+
+  // Objeto do Documento atualizado para salvar ou exportar em PDF
   const currentDocItem: DocumentItem = useMemo(() => {
     return {
       ...initialDoc,
@@ -401,7 +323,7 @@ export function GoogleDocsDocumentEditor({
       estilo_titulo: docEstiloTitulo,
       alinhamento_titulo: docAlinhamentoTitulo,
       pasta_id: docPastaId,
-      conteudo: docConteudo,
+      conteudo: consolidatedHtml,
       tamanho_conteudo: docTamanhoConteudo,
       alinhamento_conteudo: docAlinhamentoConteudo,
       estilo_conteudo: docEstiloConteudo,
@@ -420,7 +342,7 @@ export function GoogleDocsDocumentEditor({
     docEstiloTitulo,
     docAlinhamentoTitulo,
     docPastaId,
-    docConteudo,
+    consolidatedHtml,
     docTamanhoConteudo,
     docAlinhamentoConteudo,
     docEstiloConteudo,
@@ -432,96 +354,130 @@ export function GoogleDocsDocumentEditor({
     paginasAluno,
   ]);
 
-  // Atualiza o texto quando digitado em uma folha específica
-  const handlePageChange = (pageIdx: number, newPageText: string) => {
-    // Recombina os textos de todas as páginas e atualiza docConteudo
-    const pageTexts = pages.map((p, idx) => (idx === pageIdx ? newPageText : p.text));
-    const combined = pageTexts.join("\n");
-    setDocConteudo(combined);
+  // Atualiza HTML de uma folha específica ao digitar
+  const handlePageHtmlInput = (pIdx: number, newHtml: string) => {
+    setPagesHtml((prev) => {
+      const copy = [...prev];
+      copy[pIdx] = newHtml;
+      return copy;
+    });
   };
 
-  // Teclas especiais para navegação e quebra fluida entre páginas (Google Docs)
-  const handleKeyDown = (pageIdx: number, e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    const textarea = textareaRefs.current[pageIdx];
-    if (!textarea) return;
+  /**
+   * BOTÃO DINÂMICO SOLICITADO PELO USUÁRIO:
+   * - Quando NÃO está em título: "Mudar texto selecionado para o tipo título" -> transforma em <h2 class="doc-title">
+   * - Quando ESTÁ em título: "Mudar texto selecionado para não título" -> volta para <p class="doc-text">
+   * O nome do documento (docTitulo) NÃO É ALTERADO!
+   */
+  const handleToggleSelectedTitle = () => {
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) {
+      setFeedbackToast("Posicione o cursor ou selecione o texto na folha para formatar como título.");
+      setTimeout(() => setFeedbackToast(null), 3000);
+      return;
+    }
 
-    const { selectionStart, selectionEnd, value } = textarea;
+    // Identifica o contêiner editável da página ativa
+    let node: Node | null = sel.anchorNode;
+    let editableContainer: HTMLElement | null = null;
+    let headingParent: HTMLElement | null = null;
 
-    // Quando pressiona Enter no final da página que já atingiu o limite:
-    if (e.key === "Enter" && !e.shiftKey) {
-      const charsPerLine = Math.max(20, Math.floor(670 / (docTamanhoConteudo * 0.54)));
-      const lines = value.split("\n").reduce((acc, p) => acc + (p === "" ? 1 : Math.max(1, Math.ceil(p.length / charsPerLine))), 0);
-      const currentPageSlice = pages[pageIdx];
-
-      if (currentPageSlice && lines >= currentPageSlice.maxLines) {
-        // Se a página já está no seu limite máximo de linhas, o próximo Enter avança para a próxima folha
-        e.preventDefault();
-        const before = value.slice(0, selectionStart);
-        const after = value.slice(selectionEnd);
-        
-        // Atualiza páginas
-        const pageTexts = pages.map((p, idx) => (idx === pageIdx ? before : p.text));
-        if (pageIdx + 1 < pageTexts.length) {
-          pageTexts[pageIdx + 1] = after ? `\n${after}` : `\n${pageTexts[pageIdx + 1]}`;
-        } else {
-          pageTexts.push(after || "");
-          setMinPagesCount((prev) => Math.max(prev, pageIdx + 2));
+    while (node && node !== document.body) {
+      if (node.nodeType === Node.ELEMENT_NODE) {
+        const el = node as HTMLElement;
+        const tag = el.tagName.toUpperCase();
+        if (el.getAttribute("contenteditable") === "true") {
+          editableContainer = el;
+          break;
         }
+        if (!headingParent && (tag === "H1" || tag === "H2" || tag === "H3" || tag === "H4" || el.classList.contains("doc-title"))) {
+          headingParent = el;
+        }
+      }
+      node = node.parentNode;
+    }
 
-        setDocConteudo(pageTexts.join("\n"));
-        setActivePageIndex(pageIdx + 1);
-
-        setTimeout(() => {
-          const nextTextarea = textareaRefs.current[pageIdx + 1];
-          if (nextTextarea) {
-            nextTextarea.focus();
-            nextTextarea.setSelectionRange(0, 0);
-          }
-        }, 50);
-        return;
+    if (!editableContainer) {
+      // Se não encontrou pelo anchor, usa a folha ativa
+      editableContainer = editableRefs.current[activePageIndex] || editableRefs.current[0];
+      if (editableContainer) {
+        editableContainer.focus();
       }
     }
 
-    // Quando pressiona Backspace no começo da página (posição 0):
-    if (e.key === "Backspace" && selectionStart === 0 && selectionEnd === 0 && pageIdx > 0) {
-      e.preventDefault();
-      const prevTextarea = textareaRefs.current[pageIdx - 1];
-      if (prevTextarea) {
-        const prevLen = prevTextarea.value.length;
-        // Foca no final da folha anterior
-        prevTextarea.focus();
-        prevTextarea.setSelectionRange(prevLen, prevLen);
-      }
+    if (!editableContainer) {
+      setFeedbackToast("Clique na folha onde deseja aplicar a formatação.");
+      setTimeout(() => setFeedbackToast(null), 2500);
+      return;
     }
 
-    // Setas para navegar entre folhas
-    if (e.key === "ArrowDown" && selectionStart === value.length && pageIdx < pages.length - 1) {
-      const nextTextarea = textareaRefs.current[pageIdx + 1];
-      if (nextTextarea) {
-        nextTextarea.focus();
-        nextTextarea.setSelectionRange(0, 0);
+    if (headingParent || isCurrentSelectionTitle) {
+      // 1. Já é um título -> Alterna para NÃO TÍTULO (<p class="doc-text">)
+      document.execCommand("formatBlock", false, "<p>");
+      const activeEl = window.getSelection()?.anchorNode?.parentElement;
+      if (activeEl && activeEl.tagName.toUpperCase() === "P") {
+        activeEl.className = "doc-text";
       }
-    } else if (e.key === "ArrowUp" && selectionStart === 0 && pageIdx > 0) {
-      const prevTextarea = textareaRefs.current[pageIdx - 1];
-      if (prevTextarea) {
-        prevTextarea.focus();
-        const prevLen = prevTextarea.value.length;
-        prevTextarea.setSelectionRange(prevLen, prevLen);
+      setIsCurrentSelectionTitle(false);
+      setFeedbackToast("Texto formatado como texto normal (não título).");
+    } else {
+      // 2. Não é título -> Transforma em TÍTULO (<h2 class="doc-title">)
+      document.execCommand("formatBlock", false, "<h2>");
+      const activeEl = window.getSelection()?.anchorNode?.parentElement;
+      if (activeEl && (activeEl.tagName.toUpperCase() === "H2" || activeEl.tagName.toUpperCase() === "H1")) {
+        activeEl.className = "doc-title font-black uppercase tracking-wide";
       }
+      setIsCurrentSelectionTitle(true);
+      setFeedbackToast("Texto formatado como título!");
+    }
+
+    // Sincroniza HTML da página imediatamente
+    const pIdx = parseInt(editableContainer.getAttribute("data-page-index") || String(activePageIndex), 10);
+    handlePageHtmlInput(pIdx, editableContainer.innerHTML);
+    setTimeout(() => setFeedbackToast(null), 2500);
+  };
+
+  // Alternar Negrito no texto selecionado nativamente
+  const handleToggleBold = () => {
+    document.execCommand("bold", false);
+    const container = editableRefs.current[activePageIndex];
+    if (container) {
+      handlePageHtmlInput(activePageIndex, container.innerHTML);
     }
   };
 
-  // Adicionar Página explicitamente (pelo cabeçalho ou pelo rodapé final)
+  // Alinhar parágrafo ou título atual
+  const handleApplyAlignment = (align: "left" | "center" | "right" | "justify") => {
+    if (align === "left") document.execCommand("justifyLeft", false);
+    else if (align === "center") document.execCommand("justifyCenter", false);
+    else if (align === "right") document.execCommand("justifyRight", false);
+    else if (align === "justify") document.execCommand("justifyFull", false);
+
+    const container = editableRefs.current[activePageIndex];
+    if (container) {
+      handlePageHtmlInput(activePageIndex, container.innerHTML);
+    }
+  };
+
+  // Adicionar Página
   const handleAddNewPage = () => {
-    setMinPagesCount((prev) => Math.max(prev + 1, pages.length + 1));
-    setDocConteudo((prev) => (prev ? `${prev}\n\n` : "\n"));
-    const newIdx = pages.length;
-    setActivePageIndex(newIdx);
-    setFeedbackToast(`Nova Folha A4 adicionada!`);
+    setPagesHtml((prev) => [...prev, "<p><br></p>"]);
+    const nextIdx = pagesHtml.length;
+    setActivePageIndex(nextIdx);
+    setFeedbackToast(`Nova folha (Página ${nextIdx + 1}) adicionada!`);
     setTimeout(() => {
       setFeedbackToast(null);
-      textareaRefs.current[newIdx]?.focus();
-    }, 600);
+      editableRefs.current[nextIdx]?.focus();
+    }, 400);
+  };
+
+  // Remover Página (se houver mais de uma)
+  const handleRemovePage = (idxToRemove: number) => {
+    if (pagesHtml.length <= 1) return;
+    setPagesHtml((prev) => prev.filter((_, idx) => idx !== idxToRemove));
+    setActivePageIndex((prev) => Math.max(0, Math.min(prev, pagesHtml.length - 2)));
+    setFeedbackToast("Folha removida.");
+    setTimeout(() => setFeedbackToast(null), 2000);
   };
 
   // Salvar Documento
@@ -532,7 +488,7 @@ export function GoogleDocsDocumentEditor({
       setHasUnsavedChanges(false);
       const timeStr = new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
       setLastSavedTime(timeStr);
-      setFeedbackToast("Documento salvo com sucesso!");
+      setFeedbackToast("Documento e código HTML salvos com sucesso!");
       setTimeout(() => setFeedbackToast(null), 3000);
     } catch (err) {
       console.error("Erro ao salvar documento:", err);
@@ -543,75 +499,13 @@ export function GoogleDocsDocumentEditor({
     }
   };
 
-  // Botão Voltar para Documentos
+  // Voltar para Documentos
   const handleBackAction = () => {
     if (window.opener && !window.opener.closed) {
       window.close();
     } else {
       onBack();
     }
-  };
-
-  // 1. AÇÃO ESPECIAL: Mudar texto selecionado para o tipo TÍTULO
-  const handleSetSelectedAsTitle = () => {
-    const el = textareaRefs.current[activePageIndex] || textareaRefs.current[0];
-    if (!el) return;
-    const start = el.selectionStart;
-    const end = el.selectionEnd;
-    const selectedText = el.value.substring(start, end).trim();
-
-    if (selectedText) {
-      setDocTitulo(selectedText);
-      setExibirTituloNoDoc(true);
-      setFeedbackToast(`Título definido como: "${selectedText}"`);
-      setTimeout(() => setFeedbackToast(null), 3000);
-    } else {
-      setFeedbackToast("Selecione um trecho de texto no documento para definir como título.");
-      setTimeout(() => setFeedbackToast(null), 3500);
-    }
-  };
-
-  // 2. AÇÃO DE NEGRITO (B) no Conteúdo: se há seleção, negrita as palavras; se não há, alterna tudo
-  const handleToggleBoldContent = () => {
-    const el = textareaRefs.current[activePageIndex] || textareaRefs.current[0];
-    if (!el) {
-      setDocEstiloConteudo((prev) => (prev.trim() === "tudo" ? "" : "tudo"));
-      return;
-    }
-    const start = el.selectionStart;
-    const end = el.selectionEnd;
-    const selectedText = el.value.substring(start, end).trim();
-
-    if (!selectedText) {
-      setDocEstiloConteudo((prev) => (prev.trim() === "tudo" ? "" : "tudo"));
-      setFeedbackToast(docEstiloConteudo === "tudo" ? "Texto normal" : "Texto todo em negrito");
-      setTimeout(() => setFeedbackToast(null), 2000);
-      return;
-    }
-
-    const currentWords = docEstiloConteudo
-      .split(",")
-      .map((w) => w.trim())
-      .filter((w) => w && w !== "tudo");
-    const exists = currentWords.some((w) => w.toLowerCase() === selectedText.toLowerCase());
-
-    let nextWords: string[];
-    if (exists) {
-      nextWords = currentWords.filter((w) => w.toLowerCase() !== selectedText.toLowerCase());
-      setFeedbackToast(`Negrito removido de: "${selectedText}"`);
-    } else {
-      nextWords = [...currentWords, selectedText];
-      setFeedbackToast(`Negrito aplicado em: "${selectedText}"`);
-    }
-    setDocEstiloConteudo(nextWords.join(", "));
-    setTimeout(() => setFeedbackToast(null), 2500);
-  };
-
-  const getAlignClass = (align?: string) => {
-    if (align === "left") return "text-left";
-    if (align === "center") return "text-center";
-    if (align === "right") return "text-right";
-    return "text-justify";
   };
 
   const dataAtual = new Date().toLocaleDateString("pt-BR", {
@@ -624,545 +518,619 @@ export function GoogleDocsDocumentEditor({
     minute: "2-digit",
   });
 
-  const totalPagesCount = pages.length;
+  const totalPagesCount = pagesHtml.length;
 
   return (
     <div className="fixed inset-0 z-40 bg-[#eaedf1] text-zinc-900 flex flex-col font-sans select-text overflow-hidden h-screen w-screen">
       {/* ========================================================================= */}
+      {/* ESTILOS TIPOGRÁFICOS DINÂMICOS DO CANVAS EDITÁVEL HTML                   */}
+      {/* ========================================================================= */}
+      <style>{`
+        .doc-editable-sheet {
+          white-space: pre-wrap;
+          word-break: break-word;
+          font-family: Arial, Helvetica, sans-serif;
+          color: #18181b;
+        }
+        .doc-editable-sheet p {
+          margin: 0 0 4px 0;
+          min-height: 1.4em;
+          font-size: ${docTamanhoConteudo}px;
+          line-height: ${Math.max(18, docTamanhoConteudo * 1.55)}px;
+          text-align: ${docAlinhamentoConteudo};
+        }
+        .doc-editable-sheet h1,
+        .doc-editable-sheet h2,
+        .doc-editable-sheet h3,
+        .doc-editable-sheet .doc-title {
+          margin: 12px 0 6px 0;
+          font-size: ${docTamanhoTitulo}px;
+          line-height: ${Math.max(20, docTamanhoTitulo * 1.3)}px;
+          font-weight: ${docEstiloTitulo === "normal" ? 600 : 900};
+          text-align: ${docAlinhamentoTitulo};
+          text-transform: uppercase;
+          letter-spacing: 0.04em;
+          color: #09090b;
+        }
+        .doc-editable-sheet:focus {
+          outline: none;
+        }
+        .doc-editable-sheet b,
+        .doc-editable-sheet strong {
+          font-weight: 800;
+        }
+      `}</style>
+
+      {/* ========================================================================= */}
       {/* MENU SUPERIOR FIXO: CABEÇALHO + DEFINIÇÕES + ASSINATURAS (NÃO ROLA)       */}
       {/* ========================================================================= */}
       <div className="shrink-0 z-30 flex flex-col bg-white border-b border-zinc-200 select-none shadow-xs">
-        {/* 1. BARRA SUPERIOR (HEADER RESPONSIVO COM IDENTIDADE GESTÃO CURSOS)        */}
+        {/* 1. BARRA SUPERIOR (HEADER COM IDENTIDADE GESTÃO CURSOS) */}
         <header className="bg-white border-b border-zinc-200 px-3 sm:px-6 py-2.5">
-        <div className="flex flex-wrap items-center justify-between gap-3 w-full">
-          {/* BLOCO 1: Logo Gestão Cursos Programa Certo + Botão Voltar para Documentos */}
-          <div className="flex items-center gap-2.5 sm:gap-3 shrink-0 flex-wrap">
-            <div className="flex items-center gap-2 select-none shrink-0">
-              <img
-                src={LOGO_PROGRAMA_CERTO_BASE64 || "/logo-programa-certo.png"}
-                alt="Logo Gestão Cursos Programa Certo"
-                className="w-8 h-8 object-contain rounded-lg border border-zinc-200/80 shadow-2xs"
+          <div className="flex flex-wrap items-center justify-between gap-3 w-full">
+            {/* BLOCO 1: Logo Gestão Cursos Programa Certo + Botão Voltar para Documentos */}
+            <div className="flex items-center gap-2.5 sm:gap-3 shrink-0 flex-wrap">
+              <div className="flex items-center gap-2 select-none shrink-0">
+                <img
+                  src={LOGO_PROGRAMA_CERTO_BASE64 || "/logo-programa-certo.png"}
+                  alt="Logo Gestão Cursos Programa Certo"
+                  className="w-8 h-8 object-contain rounded-lg border border-zinc-200/80 shadow-2xs"
+                />
+                <div className="flex flex-col">
+                  <span className="font-black text-xs text-[#0b439c] leading-none">Gestão Cursos</span>
+                  <span className="font-bold text-[9px] text-zinc-500 leading-none mt-0.5">Programa Certo</span>
+                </div>
+              </div>
+
+              <div className="h-6 w-px bg-zinc-200 hidden sm:block shrink-0" />
+
+              {/* Botão com setinha de Voltar: "Voltar para Documentos" */}
+              <button
+                type="button"
+                onClick={handleBackAction}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-zinc-100 hover:bg-zinc-200 text-zinc-800 font-bold text-xs transition-colors cursor-pointer border border-zinc-200 shrink-0"
+                title="Voltar para a lista de Documentos"
+              >
+                <ArrowLeft className="w-4 h-4 text-[#0b439c]" />
+                <span>Voltar para Documentos</span>
+              </button>
+            </div>
+
+            {/* BLOCO 2: Nome do Documento (PERMANENTE no arquivo) + Pasta */}
+            <div className="flex items-center gap-2 flex-1 min-w-[240px] max-w-xl flex-wrap">
+              <input
+                type="text"
+                value={docTitulo}
+                onChange={(e) => setDocTitulo(e.target.value)}
+                placeholder="Nome do documento..."
+                className="flex-1 min-w-[160px] text-xs sm:text-sm font-black text-zinc-900 bg-transparent hover:bg-zinc-50 focus:bg-white focus:ring-2 focus:ring-blue-500/30 px-2 py-1 rounded-lg border border-transparent hover:border-zinc-300 focus:border-[#0b439c] outline-none transition-all truncate"
+                title="Nome do arquivo do documento (permanente, não muda ao formatar títulos no texto)"
               />
-              <div className="flex flex-col">
-                <span className="font-black text-xs text-[#0b439c] leading-none">Gestão Cursos</span>
-                <span className="font-bold text-[9px] text-zinc-500 leading-none mt-0.5">Programa Certo</span>
+
+              {/* Seletor de Pasta */}
+              <div className="flex items-center gap-1.5 px-2.5 py-1 bg-zinc-100 hover:bg-zinc-200/80 rounded-xl border border-zinc-200 text-xs font-semibold shrink-0 transition-colors">
+                <Folder className="w-3.5 h-3.5 text-[#0b439c] shrink-0" />
+                <select
+                  value={docPastaId || ""}
+                  onChange={(e) => setDocPastaId(e.target.value || null)}
+                  className="bg-transparent border-0 outline-none text-zinc-700 text-xs font-bold cursor-pointer pr-1"
+                  title="Pasta onde este documento está alocado"
+                >
+                  <option value="">Sem pasta</option>
+                  {allFolders.map((f) => (
+                    <option key={f.id} value={f.id}>
+                      {f.nome}
+                    </option>
+                  ))}
+                </select>
               </div>
             </div>
 
-            <div className="h-6 w-px bg-zinc-200 hidden sm:block shrink-0" />
+            {/* BLOCO 3: Botões de Ação */}
+            <div className="flex items-center gap-2 flex-wrap shrink-0">
+              {/* Status de Salvamento */}
+              <div className="hidden xl:flex items-center gap-1.5 text-xs font-semibold shrink-0">
+                {isSaving ? (
+                  <span className="text-amber-600 flex items-center gap-1">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    Salvando...
+                  </span>
+                ) : hasUnsavedChanges ? (
+                  <span className="text-zinc-400">Alterações pendentes</span>
+                ) : (
+                  <span className="text-emerald-700 flex items-center gap-1">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                    {lastSavedTime ? `Salvo às ${lastSavedTime}` : "Salvo"}
+                  </span>
+                )}
+              </div>
 
-            {/* Botão com setinha de Voltar: "Voltar para Documentos" */}
-            <button
-              type="button"
-              onClick={handleBackAction}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-zinc-100 hover:bg-zinc-200 text-zinc-800 font-bold text-xs transition-colors cursor-pointer border border-zinc-200 shrink-0"
-              title="Voltar para a lista de Documentos"
-            >
-              <ArrowLeft className="w-4 h-4 text-[#0b439c]" />
-              <span>Voltar para Documentos</span>
-            </button>
-          </div>
-
-          {/* BLOCO 2: Título do Documento + Pasta (quebra para baixo no celular para não ficar grudado) */}
-          <div className="flex items-center gap-2 flex-1 min-w-[240px] max-w-xl flex-wrap">
-            <input
-              type="text"
-              value={docTitulo}
-              onChange={(e) => setDocTitulo(e.target.value)}
-              placeholder="Nome do documento..."
-              className="flex-1 min-w-[160px] text-xs sm:text-sm font-black text-zinc-900 bg-transparent hover:bg-zinc-50 focus:bg-white focus:ring-2 focus:ring-blue-500/30 px-2 py-1 rounded-lg border border-transparent hover:border-zinc-300 focus:border-[#0b439c] outline-none transition-all truncate"
-              title="Clique para alterar o nome do documento"
-            />
-
-            {/* Seletor de Pasta sem emoji e sem a palavra raiz */}
-            <div className="flex items-center gap-1.5 px-2.5 py-1 bg-zinc-100 hover:bg-zinc-200/80 rounded-xl border border-zinc-200 text-xs font-semibold shrink-0 transition-colors">
-              <Folder className="w-3.5 h-3.5 text-[#0b439c] shrink-0" />
-              <select
-                value={docPastaId || ""}
-                onChange={(e) => setDocPastaId(e.target.value || null)}
-                className="bg-transparent border-0 outline-none text-zinc-700 text-xs font-bold cursor-pointer pr-1"
-                title="Pasta onde este documento está alocado"
-              >
-                <option value="">Sem pasta</option>
-                {allFolders.map((f) => (
-                  <option key={f.id} value={f.id}>
-                    {f.nome}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          {/* BLOCO 3: Botões de Ação (quebra suavemente se a tela for estreita) */}
-          <div className="flex items-center gap-2 flex-wrap shrink-0">
-            {/* Status de Salvamento */}
-            <div className="hidden xl:flex items-center gap-1.5 text-xs font-semibold shrink-0">
-              {isSaving ? (
-                <span className="text-amber-600 flex items-center gap-1">
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  Salvando...
-                </span>
-              ) : hasUnsavedChanges ? (
-                <span className="text-zinc-400">Alterações pendentes</span>
-              ) : (
-                <span className="text-emerald-700 flex items-center gap-1">
-                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                  {lastSavedTime ? `Salvo às ${lastSavedTime}` : "Salvo"}
-                </span>
-              )}
-            </div>
-
-            <button
-              type="button"
-              onClick={() => openDocumentPdfInBrowser(currentDocItem)}
-              className="px-2.5 sm:px-3 py-1.5 bg-zinc-100 hover:bg-zinc-200 text-zinc-800 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer border border-zinc-200"
-              title="Abrir PDF na Web"
-            >
-              <ExternalLink className="w-3.5 h-3.5 text-[#0b439c]" />
-              <span>Abrir na Web</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => {
-                const ok = downloadDocumentPdf(currentDocItem);
-                if (ok) {
-                  setFeedbackToast("Download do PDF iniciado!");
-                  setTimeout(() => setFeedbackToast(null), 3000);
-                }
-              }}
-              className="px-2.5 sm:px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-[#0b439c] rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer border border-blue-200"
-              title="Baixar arquivo PDF com o nome do documento no dispositivo"
-            >
-              <Download className="w-3.5 h-3.5" />
-              <span>Baixar PDF</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => printDocumentInBrowser(currentDocItem)}
-              className="px-2.5 sm:px-3 py-1.5 bg-zinc-100 hover:bg-zinc-200 text-zinc-800 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer border border-zinc-200"
-              title="Imprimir documento oficial"
-            >
-              <Printer className="w-3.5 h-3.5 text-zinc-700" />
-              <span>Imprimir</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={handleSave}
-              disabled={isSaving}
-              className="px-3 sm:px-4 py-1.5 bg-[#0b439c] hover:bg-blue-800 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shadow-md shadow-blue-900/15 cursor-pointer disabled:opacity-50"
-              title="Salvar alterações no documento"
-            >
-              {isSaving ? (
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              ) : (
-                <Save className="w-3.5 h-3.5" />
-              )}
-              <span>Salvar Alterações</span>
-            </button>
-
-            {onDelete && (
               <button
                 type="button"
-                onClick={() => onDelete(initialDoc.id)}
-                className="p-1.5 text-rose-600 hover:bg-rose-50 rounded-xl transition-colors cursor-pointer border border-rose-200 ml-1"
-                title="Excluir documento"
+                onClick={() => openDocumentPdfInBrowser(currentDocItem)}
+                className="px-2.5 sm:px-3 py-1.5 bg-zinc-100 hover:bg-zinc-200 text-zinc-800 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer border border-zinc-200"
+                title="Abrir PDF na Web"
               >
-                <Trash2 className="w-4 h-4" />
+                <ExternalLink className="w-3.5 h-3.5 text-[#0b439c]" />
+                <span>Abrir na Web</span>
               </button>
-            )}
+
+              <button
+                type="button"
+                onClick={() => {
+                  const ok = downloadDocumentPdf(currentDocItem);
+                  if (ok) {
+                    setFeedbackToast("Download do PDF iniciado!");
+                    setTimeout(() => setFeedbackToast(null), 3000);
+                  }
+                }}
+                className="px-2.5 sm:px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-[#0b439c] rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer border border-blue-200"
+                title="Baixar arquivo PDF com o nome do documento no dispositivo"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>Baixar PDF</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => printDocumentInBrowser(currentDocItem)}
+                className="px-2.5 sm:px-3 py-1.5 bg-zinc-100 hover:bg-zinc-200 text-zinc-800 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer border border-zinc-200"
+                title="Imprimir documento oficial"
+              >
+                <Printer className="w-3.5 h-3.5 text-zinc-700" />
+                <span>Imprimir</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleSave}
+                disabled={isSaving}
+                className="px-3 sm:px-4 py-1.5 bg-[#0b439c] hover:bg-blue-800 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shadow-md shadow-blue-900/15 cursor-pointer disabled:opacity-50"
+                title="Salvar alterações no documento e formato HTML"
+              >
+                {isSaving ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Save className="w-3.5 h-3.5" />
+                )}
+                <span>Salvar Alterações</span>
+              </button>
+
+              {onDelete && (
+                <button
+                  type="button"
+                  onClick={() => onDelete(initialDoc.id)}
+                  className="p-1.5 text-rose-600 hover:bg-rose-50 rounded-xl transition-colors cursor-pointer border border-rose-200 ml-1"
+                  title="Excluir documento"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              )}
+            </div>
           </div>
-        </div>
-      </header>
+        </header>
 
         {/* ========================================================================= */}
-        {/* 2. BARRA DE FERRAMENTAS (TOOLBAR: TÍTULO, DOCUMENTO, ADICIONAR PÁGINA)    */}
+        {/* 2. BARRA DE FERRAMENTAS: TÍTULO DINÂMICO, DOCUMENTO, ASSINATURAS          */}
         {/* ========================================================================= */}
         <div className="bg-[#f8fafc] px-3 sm:px-6 py-2 flex flex-col md:flex-row md:items-center md:justify-between gap-2.5">
-          <div className="flex items-center gap-2 sm:gap-4 flex-wrap">
-          {/* SEÇÃO 1: DEFINIÇÕES PARA TÍTULO */}
-          <div className="flex items-center gap-1.5 p-1 bg-white rounded-xl border border-zinc-200 shadow-2xs flex-wrap">
-            <span className="text-[10px] font-black uppercase tracking-wider text-[#0b439c] bg-blue-50 px-2 py-1 rounded-md border border-blue-200 select-none">
-              Definições para Título
-            </span>
-
-            {/* Botão: Mudar texto selecionado para o tipo título */}
-            <button
-              type="button"
-              onClick={handleSetSelectedAsTitle}
-              className="px-2 py-1 text-xs font-bold text-zinc-700 hover:text-[#0b439c] hover:bg-blue-50/80 rounded-lg transition-colors flex items-center gap-1 cursor-pointer border border-zinc-200"
-              title="Mudar o texto selecionado na folha para o título do documento"
-            >
-              <Heading className="w-3.5 h-3.5 text-[#0b439c]" />
-              <span className="hidden sm:inline text-[11px]">Mudar selecionado para Título</span>
-            </button>
-
-            {/* Tamanho da Fonte do Título [-] [num] [+] */}
-            <div className="flex items-center bg-zinc-50 border border-zinc-200 rounded-lg p-0.5">
-              <button
-                type="button"
-                onClick={() => setDocTamanhoTitulo((prev) => Math.max(10, prev - 1))}
-                className="w-5 h-6 flex items-center justify-center font-bold text-xs text-zinc-600 hover:bg-zinc-200 rounded cursor-pointer"
-                title="Diminuir fonte do título"
-              >
-                -
-              </button>
-              <span className="px-1.5 text-xs font-black text-zinc-800 min-w-6 text-center">
-                {docTamanhoTitulo}
+          <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
+            {/* SEÇÃO 1: DEFINIÇÕES PARA TÍTULO */}
+            <div className="flex items-center gap-1.5 p-1 bg-white rounded-xl border border-zinc-200 shadow-2xs flex-wrap">
+              <span className="text-[10px] font-black uppercase tracking-wider text-[#0b439c] bg-blue-50 px-2 py-1 rounded-md border border-blue-200 select-none">
+                Definições para Título
               </span>
+
+              {/* BOTÃO DINÂMICO CONFORME SOLICITADO:
+                  - Quando NÃO é título: "Mudar texto selecionado para o tipo título"
+                  - Quando É título: "Mudar texto selecionado para não título"
+              */}
               <button
                 type="button"
-                onClick={() => setDocTamanhoTitulo((prev) => Math.min(36, prev + 1))}
-                className="w-5 h-6 flex items-center justify-center font-bold text-xs text-zinc-600 hover:bg-zinc-200 rounded cursor-pointer"
-                title="Aumentar fonte do título"
+                onClick={handleToggleSelectedTitle}
+                className={`px-2.5 py-1 text-xs font-black rounded-lg transition-all flex items-center gap-1.5 cursor-pointer border ${
+                  isCurrentSelectionTitle
+                    ? "bg-[#0b439c] text-white border-blue-900 shadow-xs"
+                    : "bg-blue-50/70 hover:bg-blue-100 text-[#0b439c] border-blue-200"
+                }`}
+                title={
+                  isCurrentSelectionTitle
+                    ? "Reverter trecho selecionado para texto normal"
+                    : "Transformar trecho selecionado em título do documento"
+                }
               >
-                +
+                {isCurrentSelectionTitle ? (
+                  <>
+                    <RotateCcw className="w-3.5 h-3.5 text-white" />
+                    <span className="text-[11px]">Mudar texto selecionado para não título</span>
+                  </>
+                ) : (
+                  <>
+                    <Heading className="w-3.5 h-3.5 text-[#0b439c]" />
+                    <span className="text-[11px]">Mudar texto selecionado para o tipo título</span>
+                  </>
+                )}
               </button>
+
+              {/* Tamanho da Fonte do Título [-] [num] [+] */}
+              <div className="flex items-center bg-zinc-50 border border-zinc-200 rounded-lg p-0.5">
+                <button
+                  type="button"
+                  onClick={() => setDocTamanhoTitulo((prev) => Math.max(12, prev - 1))}
+                  className="w-5 h-6 flex items-center justify-center font-bold text-xs text-zinc-600 hover:bg-zinc-200 rounded cursor-pointer"
+                  title="Diminuir fonte do título"
+                >
+                  -
+                </button>
+                <span className="px-1.5 text-xs font-black text-zinc-800 min-w-6 text-center">
+                  {docTamanhoTitulo}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setDocTamanhoTitulo((prev) => Math.min(36, prev + 1))}
+                  className="w-5 h-6 flex items-center justify-center font-bold text-xs text-zinc-600 hover:bg-zinc-200 rounded cursor-pointer"
+                  title="Aumentar fonte do título"
+                >
+                  +
+                </button>
+              </div>
+
+              {/* Negrito do Título */}
+              <button
+                type="button"
+                onClick={() =>
+                  setDocEstiloTitulo((prev) => (prev === "negrito" ? "normal" : "negrito"))
+                }
+                className={`w-6 h-6 flex items-center justify-center rounded-lg font-black text-xs transition-colors cursor-pointer ${
+                  docEstiloTitulo === "negrito"
+                    ? "bg-[#0b439c] text-white shadow-xs"
+                    : "text-zinc-600 hover:bg-zinc-100"
+                }`}
+                title="Alternar negrito padrão dos títulos"
+              >
+                <Bold className="w-3.5 h-3.5" />
+              </button>
+
+              {/* Alinhamento do Título */}
+              <div className="flex items-center bg-zinc-50 border border-zinc-200 rounded-lg p-0.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDocAlinhamentoTitulo("left");
+                    handleApplyAlignment("left");
+                  }}
+                  className={`p-1 rounded cursor-pointer ${
+                    docAlinhamentoTitulo === "left"
+                      ? "bg-[#0b439c] text-white"
+                      : "text-zinc-600 hover:bg-zinc-200"
+                  }`}
+                  title="Alinhar título à esquerda"
+                >
+                  <AlignLeft className="w-3 h-3" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDocAlinhamentoTitulo("center");
+                    handleApplyAlignment("center");
+                  }}
+                  className={`p-1 rounded cursor-pointer ${
+                    docAlinhamentoTitulo === "center"
+                      ? "bg-[#0b439c] text-white"
+                      : "text-zinc-600 hover:bg-zinc-200"
+                  }`}
+                  title="Centralizar título"
+                >
+                  <AlignCenter className="w-3 h-3" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDocAlinhamentoTitulo("right");
+                    handleApplyAlignment("right");
+                  }}
+                  className={`p-1 rounded cursor-pointer ${
+                    docAlinhamentoTitulo === "right"
+                      ? "bg-[#0b439c] text-white"
+                      : "text-zinc-600 hover:bg-zinc-200"
+                  }`}
+                  title="Alinhar título à direita"
+                >
+                  <AlignRight className="w-3 h-3" />
+                </button>
+              </div>
             </div>
 
-            {/* Negrito do Título */}
-            <button
-              type="button"
-              onClick={() =>
-                setDocEstiloTitulo((prev) => (prev === "negrito" ? "normal" : "negrito"))
-              }
-              className={`w-6 h-6 flex items-center justify-center rounded-lg font-black text-xs transition-colors cursor-pointer ${
-                docEstiloTitulo === "negrito"
-                  ? "bg-[#0b439c] text-white shadow-xs"
-                  : "text-zinc-600 hover:bg-zinc-100"
-              }`}
-              title="Alternar negrito no título"
-            >
-              <Bold className="w-3.5 h-3.5" />
-            </button>
+            {/* SEÇÃO 2: DEFINIÇÕES PARA DOCUMENTO (CONTEÚDO) */}
+            <div className="flex items-center gap-1.5 p-1 bg-white rounded-xl border border-zinc-200 shadow-2xs flex-wrap">
+              <span className="text-[10px] font-black uppercase tracking-wider text-zinc-700 bg-zinc-100 px-2 py-1 rounded-md border border-zinc-300 select-none">
+                Definições para Documento
+              </span>
 
-            {/* Alinhamento do Título */}
-            <div className="flex items-center bg-zinc-50 border border-zinc-200 rounded-lg p-0.5">
+              {/* Tamanho da Fonte do Conteúdo [-] [num] [+] */}
+              <div className="flex items-center bg-zinc-50 border border-zinc-200 rounded-lg p-0.5">
+                <button
+                  type="button"
+                  onClick={() => setDocTamanhoConteudo((prev) => Math.max(9, prev - 1))}
+                  className="w-5 h-6 flex items-center justify-center font-bold text-xs text-zinc-600 hover:bg-zinc-200 rounded cursor-pointer"
+                  title="Diminuir fonte do texto"
+                >
+                  -
+                </button>
+                <span className="px-1.5 text-xs font-black text-zinc-800 min-w-6 text-center">
+                  {docTamanhoConteudo}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setDocTamanhoConteudo((prev) => Math.min(28, prev + 1))}
+                  className="w-5 h-6 flex items-center justify-center font-bold text-xs text-zinc-600 hover:bg-zinc-200 rounded cursor-pointer"
+                  title="Aumentar fonte do texto"
+                >
+                  +
+                </button>
+              </div>
+
+              {/* Negrito do Conteúdo */}
               <button
                 type="button"
-                onClick={() => setDocAlinhamentoTitulo("left")}
-                className={`p-1 rounded cursor-pointer ${
-                  docAlinhamentoTitulo === "left"
-                    ? "bg-[#0b439c] text-white"
-                    : "text-zinc-600 hover:bg-zinc-200"
-                }`}
-                title="Alinhar título à esquerda"
+                onClick={handleToggleBold}
+                className="w-6 h-6 flex items-center justify-center rounded-lg font-black text-xs text-zinc-700 hover:bg-zinc-100 transition-colors cursor-pointer border border-zinc-200"
+                title="Aplicar/remover negrito no texto selecionado"
               >
-                <AlignLeft className="w-3 h-3" />
+                <Bold className="w-3.5 h-3.5" />
               </button>
-              <button
-                type="button"
-                onClick={() => setDocAlinhamentoTitulo("center")}
-                className={`p-1 rounded cursor-pointer ${
-                  docAlinhamentoTitulo === "center"
-                    ? "bg-[#0b439c] text-white"
-                    : "text-zinc-600 hover:bg-zinc-200"
-                }`}
-                title="Centralizar título"
-              >
-                <AlignCenter className="w-3 h-3" />
-              </button>
-              <button
-                type="button"
-                onClick={() => setDocAlinhamentoTitulo("right")}
-                className={`p-1 rounded cursor-pointer ${
-                  docAlinhamentoTitulo === "right"
-                    ? "bg-[#0b439c] text-white"
-                    : "text-zinc-600 hover:bg-zinc-200"
-                }`}
-                title="Alinhar título à direita"
-              >
-                <AlignRight className="w-3 h-3" />
-              </button>
+
+              {/* Alinhamentos do Conteúdo */}
+              <div className="flex items-center bg-zinc-50 border border-zinc-200 rounded-lg p-0.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDocAlinhamentoConteudo("left");
+                    handleApplyAlignment("left");
+                  }}
+                  className={`p-1 rounded cursor-pointer ${
+                    docAlinhamentoConteudo === "left"
+                      ? "bg-[#0b439c] text-white"
+                      : "text-zinc-600 hover:bg-zinc-200"
+                  }`}
+                  title="Alinhar à esquerda"
+                >
+                  <AlignLeft className="w-3 h-3" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDocAlinhamentoConteudo("center");
+                    handleApplyAlignment("center");
+                  }}
+                  className={`p-1 rounded cursor-pointer ${
+                    docAlinhamentoConteudo === "center"
+                      ? "bg-[#0b439c] text-white"
+                      : "text-zinc-600 hover:bg-zinc-200"
+                  }`}
+                  title="Centralizar"
+                >
+                  <AlignCenter className="w-3 h-3" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDocAlinhamentoConteudo("right");
+                    handleApplyAlignment("right");
+                  }}
+                  className={`p-1 rounded cursor-pointer ${
+                    docAlinhamentoConteudo === "right"
+                      ? "bg-[#0b439c] text-white"
+                      : "text-zinc-600 hover:bg-zinc-200"
+                  }`}
+                  title="Alinhar à direita"
+                >
+                  <AlignRight className="w-3 h-3" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDocAlinhamentoConteudo("justify");
+                    handleApplyAlignment("justify");
+                  }}
+                  className={`p-1 rounded cursor-pointer ${
+                    docAlinhamentoConteudo === "justify"
+                      ? "bg-[#0b439c] text-white"
+                      : "text-zinc-600 hover:bg-zinc-200"
+                  }`}
+                  title="Justificado"
+                >
+                  <AlignJustify className="w-3 h-3" />
+                </button>
+              </div>
             </div>
           </div>
 
-          {/* SEÇÃO 2: DEFINIÇÕES PARA DOCUMENTO (CONTEÚDO) */}
-          <div className="flex items-center gap-1.5 p-1 bg-white rounded-xl border border-zinc-200 shadow-2xs flex-wrap">
-            <span className="text-[10px] font-black uppercase tracking-wider text-zinc-700 bg-zinc-100 px-2 py-1 rounded-md border border-zinc-300 select-none">
-              Definições para Documento
-            </span>
+          {/* SEÇÃO 3: CONFIGURAÇÃO DE ASSINATURAS */}
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* BOTÃO DE ASSINATURAS EM PÁGINAS COM POPOVER ABRINDO PARA O INTERIOR */}
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setIsSignaturesPanelOpen((prev) => !prev)}
+                className="px-3 py-1.5 bg-white hover:bg-blue-50 border border-blue-200 text-[#0b439c] rounded-xl text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs"
+                title="Configurar em quais páginas cada assinatura deve aparecer"
+              >
+                <PenTool className="w-3.5 h-3.5" />
+                <span>Assinaturas em Páginas</span>
+                <span className="w-2 h-2 rounded-full bg-blue-600 ml-0.5" />
+              </button>
 
-            {/* Tamanho da Fonte do Conteúdo [-] [num] [+] */}
-            <div className="flex items-center bg-zinc-50 border border-zinc-200 rounded-lg p-0.5">
-              <button
-                type="button"
-                onClick={() => setDocTamanhoConteudo((prev) => Math.max(9, prev - 1))}
-                className="w-5 h-6 flex items-center justify-center font-bold text-xs text-zinc-600 hover:bg-zinc-200 rounded cursor-pointer"
-                title="Diminuir fonte do texto"
-              >
-                -
-              </button>
-              <span className="px-1.5 text-xs font-black text-zinc-800 min-w-6 text-center">
-                {docTamanhoConteudo}
-              </span>
-              <button
-                type="button"
-                onClick={() => setDocTamanhoConteudo((prev) => Math.min(28, prev + 1))}
-                className="w-5 h-6 flex items-center justify-center font-bold text-xs text-zinc-600 hover:bg-zinc-200 rounded cursor-pointer"
-                title="Aumentar fonte do texto"
-              >
-                +
-              </button>
+              {/* PAINEL FLUTUANTE DE CONFIGURAÇÃO DE ASSINATURAS (ABRE PARA O INTERIOR: right-0) */}
+              {isSignaturesPanelOpen && (
+                <>
+                  <div
+                    className="fixed inset-0 z-40 bg-black/10 sm:bg-transparent"
+                    onClick={() => setIsSignaturesPanelOpen(false)}
+                  />
+
+                  <div className="absolute right-0 top-full mt-2 w-[calc(100vw-32px)] max-w-sm sm:w-96 max-h-[80vh] overflow-y-auto bg-white border border-zinc-200 rounded-2xl shadow-2xl p-4 z-50 space-y-4 animate-in fade-in zoom-in-95 duration-150">
+                    <div className="flex items-center justify-between border-b border-zinc-100 pb-2">
+                      <div className="flex items-center gap-1.5">
+                        <PenTool className="w-4 h-4 text-[#0b439c]" />
+                        <span className="text-xs font-black text-zinc-900 uppercase tracking-wider">
+                          Assinaturas em Páginas
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setIsSignaturesPanelOpen(false)}
+                        className="p-1 text-zinc-400 hover:text-zinc-700 rounded-lg cursor-pointer"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+
+                    <p className="text-[11px] text-zinc-500 leading-relaxed">
+                      Escolha quais assinaturas incluir e selecione se aparecem sempre na <strong>Última página</strong> ou em <strong>Páginas específicas</strong> (ex: 1, 4, 6).
+                    </p>
+
+                    <div className="space-y-3">
+                      {/* 1. Assinatura Programa Certo */}
+                      <div className="p-3 bg-zinc-50 border border-zinc-200 rounded-xl space-y-2">
+                        <div className="flex items-center justify-between">
+                          <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-zinc-800">
+                            <input
+                              type="checkbox"
+                              checked={incluirAssinaturaProgramaCerto}
+                              onChange={(e) => setIncluirAssinaturaProgramaCerto(e.target.checked)}
+                              className="rounded text-[#0b439c] cursor-pointer"
+                            />
+                            <span>Assinatura Programa Certo</span>
+                          </label>
+                        </div>
+
+                        {incluirAssinaturaProgramaCerto && (
+                          <div className="pl-6 space-y-1.5 pt-1">
+                            <span className="text-[10px] font-bold text-zinc-500 uppercase">Páginas:</span>
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => setPaginasProgramaCerto("ultima")}
+                                className={`px-2 py-1 rounded text-[11px] font-bold cursor-pointer transition-colors ${
+                                  paginasProgramaCerto.trim().toLowerCase() === "ultima"
+                                    ? "bg-[#0b439c] text-white"
+                                    : "bg-zinc-200 text-zinc-700 hover:bg-zinc-300"
+                                }`}
+                              >
+                                Última página
+                              </button>
+                              <input
+                                type="text"
+                                value={paginasProgramaCerto === "ultima" ? "" : paginasProgramaCerto}
+                                onChange={(e) => setPaginasProgramaCerto(e.target.value || "ultima")}
+                                placeholder="Ex: 1, 4, 6"
+                                className="flex-1 px-2 py-1 bg-white border border-zinc-300 rounded text-xs font-medium text-zinc-800 outline-none focus:border-[#0b439c]"
+                              />
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* 2. Assinatura Coordenação */}
+                      <div className="p-3 bg-zinc-50 border border-zinc-200 rounded-xl space-y-2">
+                        <div className="flex items-center justify-between">
+                          <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-zinc-800">
+                            <input
+                              type="checkbox"
+                              checked={incluirAssinaturaCordenacao}
+                              onChange={(e) => setIncluirAssinaturaCordenacao(e.target.checked)}
+                              className="rounded text-[#0b439c] cursor-pointer"
+                            />
+                            <span>Assinatura Coordenação</span>
+                          </label>
+                        </div>
+
+                        {incluirAssinaturaCordenacao && (
+                          <div className="pl-6 space-y-1.5 pt-1">
+                            <span className="text-[10px] font-bold text-zinc-500 uppercase">Páginas:</span>
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => setPaginasCordenacao("ultima")}
+                                className={`px-2 py-1 rounded text-[11px] font-bold cursor-pointer transition-colors ${
+                                  paginasCordenacao.trim().toLowerCase() === "ultima"
+                                    ? "bg-[#0b439c] text-white"
+                                    : "bg-zinc-200 text-zinc-700 hover:bg-zinc-300"
+                                }`}
+                              >
+                                Última página
+                              </button>
+                              <input
+                                type="text"
+                                value={paginasCordenacao === "ultima" ? "" : paginasCordenacao}
+                                onChange={(e) => setPaginasCordenacao(e.target.value || "ultima")}
+                                placeholder="Ex: 2"
+                                className="flex-1 px-2 py-1 bg-white border border-zinc-300 rounded text-xs font-medium text-zinc-800 outline-none focus:border-[#0b439c]"
+                              />
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* 3. Assinatura do Aluno */}
+                      <div className="p-3 bg-zinc-50 border border-zinc-200 rounded-xl space-y-2">
+                        <div className="flex items-center justify-between">
+                          <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-zinc-800">
+                            <input
+                              type="checkbox"
+                              checked={incluirAssinaturaAluno}
+                              onChange={(e) => setIncluirAssinaturaAluno(e.target.checked)}
+                              className="rounded text-[#0b439c] cursor-pointer"
+                            />
+                            <span>Assinatura do Aluno</span>
+                          </label>
+                        </div>
+
+                        {incluirAssinaturaAluno && (
+                          <div className="pl-6 space-y-1.5 pt-1">
+                            <span className="text-[10px] font-bold text-zinc-500 uppercase">Páginas:</span>
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => setPaginasAluno("ultima")}
+                                className={`px-2 py-1 rounded text-[11px] font-bold cursor-pointer transition-colors ${
+                                  paginasAluno.trim().toLowerCase() === "ultima"
+                                    ? "bg-[#0b439c] text-white"
+                                    : "bg-zinc-200 text-zinc-700 hover:bg-zinc-300"
+                                }`}
+                              >
+                                Última página
+                              </button>
+                              <input
+                                type="text"
+                                value={paginasAluno === "ultima" ? "" : paginasAluno}
+                                onChange={(e) => setPaginasAluno(e.target.value || "ultima")}
+                                placeholder="Ex: 1"
+                                className="flex-1 px-2 py-1 bg-white border border-zinc-300 rounded text-xs font-medium text-zinc-800 outline-none focus:border-[#0b439c]"
+                              />
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="pt-2 border-t border-zinc-100 flex justify-end">
+                      <button
+                        type="button"
+                        onClick={() => setIsSignaturesPanelOpen(false)}
+                        className="px-3 py-1.5 bg-[#0b439c] text-white rounded-lg text-xs font-bold hover:bg-blue-800 cursor-pointer"
+                      >
+                        Confirmar Definições
+                      </button>
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
-
-            {/* Negrito do Conteúdo */}
-            <button
-              type="button"
-              onClick={handleToggleBoldContent}
-              className={`w-6 h-6 flex items-center justify-center rounded-lg font-black text-xs transition-colors cursor-pointer ${
-                docEstiloConteudo
-                  ? "bg-[#0b439c] text-white shadow-xs"
-                  : "text-zinc-600 hover:bg-zinc-100"
-              }`}
-              title="Negrito na seleção ou texto inteiro"
-            >
-              <Bold className="w-3.5 h-3.5" />
-            </button>
-
-            {/* Alinhamento do Conteúdo */}
-            <div className="flex items-center bg-zinc-50 border border-zinc-200 rounded-lg p-0.5">
-              <button
-                type="button"
-                onClick={() => setDocAlinhamentoConteudo("left")}
-                className={`p-1 rounded cursor-pointer ${
-                  docAlinhamentoConteudo === "left"
-                    ? "bg-[#0b439c] text-white"
-                    : "text-zinc-600 hover:bg-zinc-200"
-                }`}
-                title="Alinhar à esquerda"
-              >
-                <AlignLeft className="w-3 h-3" />
-              </button>
-              <button
-                type="button"
-                onClick={() => setDocAlinhamentoConteudo("center")}
-                className={`p-1 rounded cursor-pointer ${
-                  docAlinhamentoConteudo === "center"
-                    ? "bg-[#0b439c] text-white"
-                    : "text-zinc-600 hover:bg-zinc-200"
-                }`}
-                title="Centralizar"
-              >
-                <AlignCenter className="w-3 h-3" />
-              </button>
-              <button
-                type="button"
-                onClick={() => setDocAlinhamentoConteudo("right")}
-                className={`p-1 rounded cursor-pointer ${
-                  docAlinhamentoConteudo === "right"
-                    ? "bg-[#0b439c] text-white"
-                    : "text-zinc-600 hover:bg-zinc-200"
-                }`}
-                title="Alinhar à direita"
-              >
-                <AlignRight className="w-3 h-3" />
-              </button>
-              <button
-                type="button"
-                onClick={() => setDocAlinhamentoConteudo("justify")}
-                className={`p-1 rounded cursor-pointer ${
-                  docAlinhamentoConteudo === "justify"
-                    ? "bg-[#0b439c] text-white"
-                    : "text-zinc-600 hover:bg-zinc-200"
-                }`}
-                title="Justificado"
-              >
-                <AlignJustify className="w-3 h-3" />
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* SEÇÃO 3: CONFIGURAÇÃO DE ASSINATURAS */}
-        <div className="flex items-center gap-2 flex-wrap">
-          {/* BOTÃO DE ASSINATURAS EM PÁGINAS COM POPOVER ABRINDO PARA A DIREITA */}
-          <div className="relative">
-            <button
-              type="button"
-              onClick={() => setIsSignaturesPanelOpen((prev) => !prev)}
-              className="px-3 py-1.5 bg-white hover:bg-blue-50 border border-blue-200 text-[#0b439c] rounded-xl text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs"
-              title="Configurar em quais páginas cada assinatura deve aparecer"
-            >
-              <PenTool className="w-3.5 h-3.5" />
-              <span>Assinaturas em Páginas</span>
-              <span className="w-2 h-2 rounded-full bg-blue-600 ml-0.5" />
-            </button>
-
-            {/* PAINEL FLUTUANTE DE CONFIGURAÇÃO DE ASSINATURAS (ABRE PARA A DIREITA: left-0) */}
-            {isSignaturesPanelOpen && (
-              <>
-                {/* Backdrop para fechar ao clicar fora em telas de toque */}
-                <div
-                  className="fixed inset-0 z-40 bg-black/10 sm:bg-transparent"
-                  onClick={() => setIsSignaturesPanelOpen(false)}
-                />
-
-                {/* PAINEL FLUTUANTE DE CONFIGURAÇÃO DE ASSINATURAS (ABRE PARA O INTERIOR: right-0) */}
-                <div className="absolute right-0 top-full mt-2 w-[calc(100vw-32px)] max-w-sm sm:w-96 max-h-[80vh] overflow-y-auto bg-white border border-zinc-200 rounded-2xl shadow-2xl p-4 z-50 space-y-4 animate-in fade-in zoom-in-95 duration-150">
-                  <div className="flex items-center justify-between border-b border-zinc-100 pb-2">
-                    <div className="flex items-center gap-1.5">
-                      <PenTool className="w-4 h-4 text-[#0b439c]" />
-                      <span className="text-xs font-black text-zinc-900 uppercase tracking-wider">
-                        Assinaturas em Páginas
-                      </span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setIsSignaturesPanelOpen(false)}
-                      className="p-1 text-zinc-400 hover:text-zinc-700 rounded-lg cursor-pointer"
-                    >
-                      <X className="w-4 h-4" />
-                    </button>
-                  </div>
-
-                  <p className="text-[11px] text-zinc-500 leading-relaxed">
-                    Escolha quais assinaturas incluir e selecione se aparecem sempre na <strong>Última página</strong> ou em <strong>Páginas específicas</strong> (ex: 1, 4, 6).
-                  </p>
-
-                  <div className="space-y-3">
-                    {/* 1. Assinatura Programa Certo */}
-                    <div className="p-3 bg-zinc-50 border border-zinc-200 rounded-xl space-y-2">
-                      <div className="flex items-center justify-between">
-                        <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-zinc-800">
-                          <input
-                            type="checkbox"
-                            checked={incluirAssinaturaProgramaCerto}
-                            onChange={(e) => setIncluirAssinaturaProgramaCerto(e.target.checked)}
-                            className="rounded text-[#0b439c] cursor-pointer"
-                          />
-                          <span>Assinatura Programa Certo</span>
-                        </label>
-                      </div>
-
-                      {incluirAssinaturaProgramaCerto && (
-                        <div className="pl-6 space-y-1.5 pt-1">
-                          <span className="text-[10px] font-bold text-zinc-500 uppercase">Páginas:</span>
-                          <div className="flex items-center gap-2">
-                            <button
-                              type="button"
-                              onClick={() => setPaginasProgramaCerto("ultima")}
-                              className={`px-2 py-1 rounded text-[11px] font-bold cursor-pointer transition-colors ${
-                                paginasProgramaCerto.trim().toLowerCase() === "ultima"
-                                  ? "bg-[#0b439c] text-white"
-                                  : "bg-zinc-200 text-zinc-700 hover:bg-zinc-300"
-                              }`}
-                            >
-                              Última página
-                            </button>
-                            <input
-                              type="text"
-                              value={paginasProgramaCerto === "ultima" ? "" : paginasProgramaCerto}
-                              onChange={(e) => setPaginasProgramaCerto(e.target.value || "ultima")}
-                              placeholder="Ex: 1, 4, 6"
-                              className="flex-1 px-2 py-1 bg-white border border-zinc-300 rounded text-xs font-medium text-zinc-800 outline-none focus:border-[#0b439c]"
-                            />
-                          </div>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* 2. Assinatura Coordenação */}
-                    <div className="p-3 bg-zinc-50 border border-zinc-200 rounded-xl space-y-2">
-                      <div className="flex items-center justify-between">
-                        <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-zinc-800">
-                          <input
-                            type="checkbox"
-                            checked={incluirAssinaturaCordenacao}
-                            onChange={(e) => setIncluirAssinaturaCordenacao(e.target.checked)}
-                            className="rounded text-[#0b439c] cursor-pointer"
-                          />
-                          <span>Assinatura Coordenação</span>
-                        </label>
-                      </div>
-
-                      {incluirAssinaturaCordenacao && (
-                        <div className="pl-6 space-y-1.5 pt-1">
-                          <span className="text-[10px] font-bold text-zinc-500 uppercase">Páginas:</span>
-                          <div className="flex items-center gap-2">
-                            <button
-                              type="button"
-                              onClick={() => setPaginasCordenacao("ultima")}
-                              className={`px-2 py-1 rounded text-[11px] font-bold cursor-pointer transition-colors ${
-                                paginasCordenacao.trim().toLowerCase() === "ultima"
-                                  ? "bg-[#0b439c] text-white"
-                                  : "bg-zinc-200 text-zinc-700 hover:bg-zinc-300"
-                              }`}
-                            >
-                              Última página
-                            </button>
-                            <input
-                              type="text"
-                              value={paginasCordenacao === "ultima" ? "" : paginasCordenacao}
-                              onChange={(e) => setPaginasCordenacao(e.target.value || "ultima")}
-                              placeholder="Ex: 2"
-                              className="flex-1 px-2 py-1 bg-white border border-zinc-300 rounded text-xs font-medium text-zinc-800 outline-none focus:border-[#0b439c]"
-                            />
-                          </div>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* 3. Assinatura do Aluno */}
-                    <div className="p-3 bg-zinc-50 border border-zinc-200 rounded-xl space-y-2">
-                      <div className="flex items-center justify-between">
-                        <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-zinc-800">
-                          <input
-                            type="checkbox"
-                            checked={incluirAssinaturaAluno}
-                            onChange={(e) => setIncluirAssinaturaAluno(e.target.checked)}
-                            className="rounded text-[#0b439c] cursor-pointer"
-                          />
-                          <span>Assinatura do Aluno</span>
-                        </label>
-                      </div>
-
-                      {incluirAssinaturaAluno && (
-                        <div className="pl-6 space-y-1.5 pt-1">
-                          <span className="text-[10px] font-bold text-zinc-500 uppercase">Páginas:</span>
-                          <div className="flex items-center gap-2">
-                            <button
-                              type="button"
-                              onClick={() => setPaginasAluno("ultima")}
-                              className={`px-2 py-1 rounded text-[11px] font-bold cursor-pointer transition-colors ${
-                                paginasAluno.trim().toLowerCase() === "ultima"
-                                  ? "bg-[#0b439c] text-white"
-                                  : "bg-zinc-200 text-zinc-700 hover:bg-zinc-300"
-                              }`}
-                            >
-                              Última página
-                            </button>
-                            <input
-                              type="text"
-                              value={paginasAluno === "ultima" ? "" : paginasAluno}
-                              onChange={(e) => setPaginasAluno(e.target.value || "ultima")}
-                              placeholder="Ex: 1"
-                              className="flex-1 px-2 py-1 bg-white border border-zinc-300 rounded text-xs font-medium text-zinc-800 outline-none focus:border-[#0b439c]"
-                            />
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="pt-2 border-t border-zinc-100 flex justify-end">
-                    <button
-                      type="button"
-                      onClick={() => setIsSignaturesPanelOpen(false)}
-                      className="px-3 py-1.5 bg-[#0b439c] text-white rounded-lg text-xs font-bold hover:bg-blue-800 cursor-pointer"
-                    >
-                      Confirmar Definições
-                    </button>
-                  </div>
-                </div>
-              </>
-            )}
           </div>
         </div>
       </div>
-    </div>
 
       {/* Toast Feedback */}
       {feedbackToast && (
@@ -1179,24 +1147,47 @@ export function GoogleDocsDocumentEditor({
         ref={containerRef}
         className="flex-1 min-h-0 py-8 px-2 sm:px-6 flex flex-col items-center overflow-y-auto overscroll-contain space-y-8 select-text"
       >
-        {pages.map((page, pIdx) => {
-          const pageNumber = page.pageNumber;
-          const isFirstPage = page.isFirstPage;
-          const isLastPage = page.isLastPage;
-          const sigs = page.signatures;
+        {pagesHtml.map((pageHtml, pIdx) => {
+          const pageNumber = pIdx + 1;
+          const isFirstPage = pIdx === 0;
+          const sigs = getActiveSignaturesForPage(
+            {
+              incluir_assinatura_programa_certo: incluirAssinaturaProgramaCerto,
+              paginas_assinatura_programa_certo: paginasProgramaCerto,
+              incluir_assinatura_cordenacao: incluirAssinaturaCordenacao,
+              paginas_assinatura_cordenacao: paginasCordenacao,
+              incluir_campo_assinatura_aluno: incluirAssinaturaAluno,
+              incluir_assinatura_aluno: incluirAssinaturaAluno,
+              paginas_assinatura_aluno: paginasAluno,
+            },
+            pageNumber,
+            totalPagesCount
+          );
 
           const scaledW = Math.round(794 * scale);
           const scaledH = Math.round(1123 * scale);
 
           return (
             <React.Fragment key={pageNumber}>
-              {/* Linha divisória de corte de página limpa (SEM BOTÕES NO MEIO) */}
+              {/* Linha divisória de corte de página limpa */}
               {pIdx > 0 && (
-                <div className="w-full max-w-[794px] flex items-center justify-center gap-3 py-1 select-none">
+                <div className="w-full max-w-[794px] flex items-center justify-between gap-3 py-1 select-none">
                   <div className="h-px bg-zinc-300 flex-1 border-t border-dashed border-zinc-400" />
-                  <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500 bg-white px-3 py-1 rounded-full border border-zinc-300 shadow-2xs">
-                    Página {pageNumber} • Início da Folha
-                  </span>
+                  <div className="flex items-center gap-2 bg-white px-3 py-1 rounded-full border border-zinc-300 shadow-2xs">
+                    <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500">
+                      Página {pageNumber} • Início da Folha
+                    </span>
+                    {pagesHtml.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => handleRemovePage(pIdx)}
+                        className="text-rose-500 hover:text-rose-700 p-0.5 rounded cursor-pointer"
+                        title="Remover esta folha extra"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    )}
+                  </div>
                   <div className="h-px bg-zinc-300 flex-1 border-t border-dashed border-zinc-400" />
                 </div>
               )}
@@ -1226,7 +1217,7 @@ export function GoogleDocsDocumentEditor({
                   }}
                   onClick={() => {
                     setActivePageIndex(pIdx);
-                    textareaRefs.current[pIdx]?.focus();
+                    editableRefs.current[pIdx]?.focus();
                   }}
                 >
                   {/* TOPO: CABEÇALHO OFICIAL FIXO DA FOLHA */}
@@ -1254,61 +1245,34 @@ export function GoogleDocsDocumentEditor({
                       </div>
                     </div>
 
-                    {/* TÍTULO EDITÁVEL DIRETAMENTE NA FOLHA 1 */}
-                    {isFirstPage && exibirTituloNoDoc && (
-                      <div className="mb-6 shrink-0">
-                        <input
-                          type="text"
-                          value={docTitulo}
-                          onChange={(e) => setDocTitulo(e.target.value)}
-                          placeholder="CLIQUE PARA DIGITAR O TÍTULO DO DOCUMENTO..."
-                          style={{
-                            fontSize: `${docTamanhoTitulo}px`,
-                            lineHeight: 1.3,
-                            fontFamily: "Arial, Helvetica, sans-serif",
-                          }}
-                          className={`w-full bg-transparent border-b border-transparent hover:border-zinc-300 focus:border-[#0b439c] focus:bg-blue-50/20 px-1 py-0.5 outline-none uppercase tracking-wide text-zinc-900 transition-colors ${
-                            docEstiloTitulo === "normal" ? "font-semibold" : "font-black"
-                          } ${getAlignClass(docAlinhamentoTitulo)}`}
-                          title="Clique diretamente aqui para editar o título deste documento"
-                        />
-                      </div>
-                    )}
-
-                    {/* CORPO DO DOCUMENTO: ÁREA COM CAPACIDADE ESTATUTÁRIA RIGOROSA */}
-                    <div
-                      style={{
-                        height: `${page.maxLines * contentLineHeight}px`,
-                        maxHeight: `${page.maxLines * contentLineHeight}px`,
-                      }}
-                      className="w-full flex-1 flex flex-col min-h-0 relative overflow-hidden"
-                    >
-                      <textarea
+                    {/* CORPO DO DOCUMENTO: ÁREA EDITÁVEL COM CÓDIGO HTML INTEGRADO */}
+                    <div className="w-full flex-1 flex flex-col min-h-0 relative overflow-y-auto overscroll-contain">
+                      <div
                         ref={(el) => {
-                          textareaRefs.current[pIdx] = el;
+                          editableRefs.current[pIdx] = el;
+                          if (el && !el.hasAttribute("data-mounted")) {
+                            el.innerHTML = pageHtml;
+                            el.setAttribute("data-mounted", "true");
+                          }
                         }}
-                        value={page.text}
-                        onChange={(e) => handlePageChange(pIdx, e.target.value)}
-                        onKeyDown={(e) => handleKeyDown(pIdx, e)}
-                        onFocus={() => setActivePageIndex(pIdx)}
-                        placeholder={
-                          isFirstPage
-                            ? "Clique aqui para começar a digitar o conteúdo do documento diretamente na folha... O texto é cortado e avança automaticamente para a próxima folha quando o limite da página é atingido."
-                            : `Conteúdo contínuo na Folha ${pageNumber}...`
-                        }
+                        data-page-index={pIdx}
+                        contentEditable
+                        suppressContentEditableWarning
+                        onInput={(e) => {
+                          const target = e.currentTarget;
+                          handlePageHtmlInput(pIdx, target.innerHTML);
+                          checkSelectionIsTitle();
+                        }}
+                        onFocus={() => {
+                          setActivePageIndex(pIdx);
+                          checkSelectionIsTitle();
+                        }}
+                        onKeyUp={checkSelectionIsTitle}
+                        onMouseUp={checkSelectionIsTitle}
+                        className="doc-editable-sheet w-full flex-1 min-h-[300px] outline-none select-text cursor-text"
                         style={{
-                          fontSize: `${docTamanhoConteudo}px`,
-                          lineHeight: `${contentLineHeight}px`,
-                          fontFamily: "Arial, Helvetica, sans-serif",
-                          whiteSpace: "pre-wrap",
-                          wordBreak: "break-word",
-                          fontWeight: docEstiloConteudo === "tudo" ? 700 : 400,
-                          height: `${page.maxLines * contentLineHeight}px`,
-                          maxHeight: `${page.maxLines * contentLineHeight}px`,
+                          minHeight: sigs.hasAny ? "580px" : "750px",
                         }}
-                        className={`w-full flex-1 bg-transparent border-none outline-none resize-none text-zinc-900 placeholder:text-zinc-400 focus:ring-0 overflow-hidden ${getAlignClass(
-                          docAlinhamentoConteudo
-                        )}`}
                       />
                     </div>
                   </div>
@@ -1398,7 +1362,7 @@ export function GoogleDocsDocumentEditor({
           );
         })}
 
-        {/* ÚNICO BOTÃO DE ADICIONAR NOVA FOLHA: EXCLUSIVAMENTE NO FINAL DO DOCUMENTO */}
+        {/* BOTÃO DE ADICIONAR NOVA FOLHA: EXCLUSIVAMENTE NO FINAL DO DOCUMENTO */}
         <div className="w-full max-w-[794px] flex justify-center py-6 select-none">
           <button
             type="button"

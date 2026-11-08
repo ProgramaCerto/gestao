@@ -4,6 +4,156 @@ import { LOGO_PROGRAMA_CERTO_BASE64 } from "./logoBase64";
 
 const JsPdfClass: any = (jspdfLib as any).jsPDF || (jspdfLib as any).default || jspdfLib;
 
+export interface DocContentBlock {
+  type: "heading" | "paragraph" | "blank" | "pagebreak";
+  text: string;
+  isBold?: boolean;
+  align?: "left" | "center" | "right" | "justify";
+}
+
+/**
+ * Converte o conteúdo HTML ou texto do documento em blocos estruturados
+ * para desenho tipográfico no PDF, garantindo que NENHUMA tag HTML (<p>, <h2>, etc)
+ * seja exposta na impressão ou no PDF gerado.
+ */
+export function parseDocContentBlocks(
+  content: string,
+  defaultContentAlign: "left" | "center" | "right" | "justify" = "justify",
+  defaultTitleAlign: "left" | "center" | "right" = "center"
+): DocContentBlock[] {
+  if (!content) return [];
+
+  // Se não contém HTML, trata como texto simples legado
+  if (!content.includes("<") && !content.includes(">")) {
+    const rawLines = content.split("\n");
+    const blocks: DocContentBlock[] = [];
+    for (const line of rawLines) {
+      if (line.includes("\f")) {
+        blocks.push({ type: "pagebreak", text: "" });
+      } else if (!line.trim()) {
+        blocks.push({ type: "blank", text: "" });
+      } else {
+        blocks.push({
+          type: "paragraph",
+          text: line,
+          align: defaultContentAlign,
+        });
+      }
+    }
+    return blocks;
+  }
+
+  // Se estiver no navegador, usa o DOM para parseamento perfeito
+  if (typeof document !== "undefined") {
+    const div = document.createElement("div");
+    // Normaliza quebras manuais legadas \f
+    const normalized = content.split("\f").join('<div class="page-break"></div>');
+    div.innerHTML = normalized;
+
+    const blocks: DocContentBlock[] = [];
+
+    const walk = (node: Node) => {
+      if (node.nodeType === Node.COMMENT_NODE) {
+        const commentTxt = (node.textContent || "").toLowerCase();
+        if (commentTxt.includes("page_break") || commentTxt.includes("pagebreak")) {
+          blocks.push({ type: "pagebreak", text: "" });
+        }
+        return;
+      }
+
+      if (node.nodeType === Node.ELEMENT_NODE) {
+        const el = node as HTMLElement;
+        const tag = el.tagName.toLowerCase();
+
+        // Quebra de página
+        if (
+          tag === "hr" ||
+          el.classList.contains("page-break") ||
+          el.dataset.pageBreak === "true" ||
+          el.style.pageBreakAfter === "always"
+        ) {
+          blocks.push({ type: "pagebreak", text: "" });
+          return;
+        }
+
+        // Título / Heading
+        if (tag === "h1" || tag === "h2" || tag === "h3" || el.classList.contains("doc-title")) {
+          const txt = (el.textContent || "").trim();
+          if (txt) {
+            let align: any = defaultTitleAlign;
+            if (el.style.textAlign) align = el.style.textAlign;
+            blocks.push({
+              type: "heading",
+              text: txt,
+              isBold: true,
+              align,
+            });
+          }
+          return;
+        }
+
+        // Parágrafo ou bloco de texto
+        if (tag === "p" || tag === "div" || tag === "blockquote" || tag === "li") {
+          const innerTxt = el.textContent || "";
+          if (!innerTxt.trim()) {
+            blocks.push({ type: "blank", text: "" });
+          } else {
+            let align: any = defaultContentAlign;
+            if (el.style.textAlign) align = el.style.textAlign;
+            const isBold =
+              el.style.fontWeight === "bold" ||
+              parseInt(el.style.fontWeight, 10) >= 600 ||
+              el.querySelector("b, strong") !== null;
+            blocks.push({
+              type: "paragraph",
+              text: innerTxt.replace(/\u00a0/g, " "), // Converte &nbsp; em espaço normal
+              isBold,
+              align,
+            });
+          }
+          return;
+        }
+
+        // Se for outro elemento de bloco ou container
+        if (el.childNodes.length > 0) {
+          el.childNodes.forEach(walk);
+          return;
+        }
+      }
+
+      if (node.nodeType === Node.TEXT_NODE) {
+        const txt = (node.textContent || "").replace(/\u00a0/g, " ");
+        if (txt.trim()) {
+          blocks.push({
+            type: "paragraph",
+            text: txt,
+            align: defaultContentAlign,
+          });
+        }
+      }
+    };
+
+    div.childNodes.forEach(walk);
+    return blocks;
+  }
+
+  // Fallback seguro via regex caso sem DOM
+  const blocks: DocContentBlock[] = [];
+  const parts = content.split(/(<\/p>|<\/div>|<\/h[1-6]>|<br\s*[\/]?>)/gi);
+  for (const part of parts) {
+    const clean = part.replace(/<[^>]+>/g, "").replace(/&nbsp;/g, " ").trim();
+    if (!clean) continue;
+    const isHeading = /<h[1-6]|class=["']doc-title["']/i.test(part);
+    blocks.push({
+      type: isHeading ? "heading" : "paragraph",
+      text: clean,
+      isBold: isHeading,
+      align: isHeading ? defaultTitleAlign : defaultContentAlign,
+    });
+  }
+  return blocks;
+}
+
 /**
  * Constrói e formata um documento em PDF de alta resolução
  * no mesmo esquema da Central de Atendimento (jsPDF profissional),
@@ -97,7 +247,7 @@ export function buildDocumentPdfDoc(docItem: DocumentItem): any {
 
   let y = drawHeader(1);
 
-  // 2. TÍTULO DO DOCUMENTO (Com tamanho numérico, estilo e alinhamento customizados)
+  // 2. PARSEAMENTO E FORMATAÇÃO DO CONTEÚDO (SUPORTE NATIVO A CÓDIGO HTML COM TÍTULOS E ESPAÇAMENTOS)
   let titleFontSize = 14;
   if (docItem.tamanho_titulo) {
     const parsed = parseInt(String(docItem.tamanho_titulo), 10);
@@ -109,30 +259,8 @@ export function buildDocumentPdfDoc(docItem: DocumentItem): any {
       titleFontSize = 17;
     }
   }
-  const titleLineHeight = Math.max(4.5, titleFontSize * 0.45);
+  const titleLineHeight = Math.max(5.0, titleFontSize * 0.50);
 
-  const titleFontStyle = docItem.estilo_titulo === "normal" ? "normal" : "bold";
-  doc.setFontSize(titleFontSize);
-  doc.setFont("helvetica", titleFontStyle);
-  doc.setTextColor(24, 24, 27);
-
-  const titleLines: string[] = doc.splitTextToSize(docItem.titulo.toUpperCase(), contentWidth);
-  const titleAlign = docItem.alinhamento_titulo || "center";
-
-  titleLines.forEach((tLine: string) => {
-    let titleX = pageWidth / 2;
-    if (titleAlign === "left") {
-      titleX = margin;
-    } else if (titleAlign === "right") {
-      titleX = rightX;
-    }
-    doc.text(tLine, titleX, y + 4, { align: titleAlign as any });
-    y += titleLineHeight;
-  });
-  // Espaço nítido e respirável entre o título e o conteúdo do documento
-  y += 14;
-
-  // 3. CONTEÚDO DO DOCUMENTO (Com tamanho numérico, estilo negrito e quebra de páginas fiel)
   let contentFontSize = 10;
   if (docItem.tamanho_conteudo) {
     const parsed = parseInt(String(docItem.tamanho_conteudo), 10);
@@ -149,12 +277,6 @@ export function buildDocumentPdfDoc(docItem: DocumentItem): any {
   const isAllBold = (docItem.estilo_conteudo || "").trim().toLowerCase() === "tudo" || (docItem.estilo_conteudo || "").trim().toLowerCase() === "todo";
   const defaultFontStyle = isAllBold ? "bold" : "normal";
 
-  // Preserva exatamente o texto sem trim agressivo para respeitar quebras e espaços digitados
-  const textContent = docItem.conteudo ?? "";
-  doc.setFontSize(contentFontSize);
-  doc.setFont("helvetica", defaultFontStyle);
-  doc.setTextColor(39, 39, 42);
-
   const hasAnySignature = Boolean(
     docItem.incluir_assinatura_programa_certo ||
     docItem.incluir_assinatura_cordenacao ||
@@ -162,59 +284,123 @@ export function buildDocumentPdfDoc(docItem: DocumentItem): any {
     (docItem as any).incluir_assinatura_aluno
   );
 
-  const paragraphs = textContent.split("\n");
-  for (let pIdx = 0; pIdx < paragraphs.length; pIdx++) {
-    const rawPara = paragraphs[pIdx];
+  // Parseamento dos blocos de HTML / Texto do documento
+  const rawContent = docItem.conteudo ?? "";
+  const blocks = parseDocContentBlocks(
+    rawContent,
+    docItem.alinhamento_conteudo || "justify",
+    docItem.alinhamento_titulo || "center"
+  );
+
+  // Se o documento é puramente legado em texto plano (sem HTML e sem cabeçalhos próprios), desenha o título legado
+  const isPureLegacy = !rawContent.includes("<") && blocks.every((b) => b.type !== "heading");
+  if (isPureLegacy && docItem.titulo && docItem.titulo.trim()) {
+    const titleFontStyle = docItem.estilo_titulo === "normal" ? "normal" : "bold";
+    doc.setFontSize(titleFontSize);
+    doc.setFont("helvetica", titleFontStyle);
+    doc.setTextColor(24, 24, 27);
+
+    const legacyTitleLines: string[] = doc.splitTextToSize(docItem.titulo.toUpperCase(), contentWidth);
+    const titleAlign = docItem.alinhamento_titulo || "center";
+
+    legacyTitleLines.forEach((tLine: string) => {
+      let titleX = pageWidth / 2;
+      if (titleAlign === "left") titleX = margin;
+      else if (titleAlign === "right") titleX = rightX;
+      doc.text(tLine, titleX, y + 4, { align: titleAlign as any });
+      y += titleLineHeight;
+    });
+    y += 12;
+  }
+
+  // Renderização estruturada de cada bloco de texto e título no PDF (NUNCA exibe códigos HTML)
+  for (let bIdx = 0; bIdx < blocks.length; bIdx++) {
+    const block = blocks[bIdx];
     const pageLimit = hasAnySignature ? maxContentY - 45 : maxContentY - 8;
 
-    // Quebra de página explícita da folha A4 (\f)
-    if (rawPara.includes("\f")) {
+    // Quebra de página explícita (folha A4 seguinte)
+    if (block.type === "pagebreak") {
       y = addNewDocPage();
       y += 6;
+      continue;
+    }
+
+    // Linha em branco / espaço intencional preservado
+    if (block.type === "blank") {
+      if (y + contentLineHeight > pageLimit) {
+        y = addNewDocPage();
+        y += 6;
+      }
+      y += contentLineHeight;
+      continue;
+    }
+
+    // Título / Heading definido no documento
+    if (block.type === "heading") {
+      doc.setFontSize(titleFontSize);
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(24, 24, 27);
+
+      const hLines: string[] = doc.splitTextToSize(block.text.toUpperCase(), contentWidth);
+      const hAlign = block.align || docItem.alinhamento_titulo || "center";
+
+      // Espaço antes do título se não estiver no topo da folha
+      if (y > 35) y += 4;
+
+      for (const hLine of hLines) {
+        if (y + titleLineHeight > pageLimit) {
+          y = addNewDocPage();
+          y += 6;
+          doc.setFontSize(titleFontSize);
+          doc.setFont("helvetica", "bold");
+          doc.setTextColor(24, 24, 27);
+        }
+
+        let hX = pageWidth / 2;
+        if (hAlign === "left") hX = margin;
+        else if (hAlign === "right") hX = rightX;
+
+        doc.text(hLine, hX, y + 2, { align: hAlign as any });
+        y += titleLineHeight;
+      }
+      y += 6; // Espaço após o título
+      continue;
+    }
+
+    // Parágrafo de texto normal
+    if (block.type === "paragraph") {
+      const pFontStyle = block.isBold || isAllBold ? "bold" : "normal";
       doc.setFontSize(contentFontSize);
-      doc.setFont("helvetica", defaultFontStyle);
+      doc.setFont("helvetica", pFontStyle);
       doc.setTextColor(39, 39, 42);
-      continue;
-    }
 
-    // Linha em branco (espaçamento intencional / enters sucessivos)
-    if (rawPara === "") {
-      if (y + contentLineHeight > pageLimit) {
-        y = addNewDocPage();
-        y += 6;
-        doc.setFontSize(contentFontSize);
-        doc.setFont("helvetica", defaultFontStyle);
-        doc.setTextColor(39, 39, 42);
+      const pLines: string[] = doc.splitTextToSize(block.text, contentWidth);
+      const pAlign = block.align || docItem.alinhamento_conteudo || "justify";
+
+      for (const pLine of pLines) {
+        if (y + contentLineHeight > pageLimit) {
+          y = addNewDocPage();
+          y += 6;
+          doc.setFontSize(contentFontSize);
+          doc.setFont("helvetica", pFontStyle);
+          doc.setTextColor(39, 39, 42);
+        }
+
+        let pX = margin;
+        let alignMode: any = pAlign;
+        if (pAlign === "center") {
+          pX = pageWidth / 2;
+        } else if (pAlign === "right") {
+          pX = rightX;
+        } else if (pAlign === "justify") {
+          pX = margin;
+          alignMode = "justify";
+        }
+
+        doc.text(pLine, pX, y, { align: alignMode });
+        y += contentLineHeight;
       }
-      y += contentLineHeight;
-      continue;
-    }
-
-    const lines: string[] = doc.splitTextToSize(rawPara, contentWidth);
-    for (const line of lines) {
-      if (y + contentLineHeight > pageLimit) {
-        y = addNewDocPage();
-        y += 6;
-        doc.setFontSize(contentFontSize);
-        doc.setFont("helvetica", defaultFontStyle);
-        doc.setTextColor(39, 39, 42);
-      }
-
-      let lineX = margin;
-      let alignMode: any = "left";
-      if (docItem.alinhamento_conteudo === "center") {
-        lineX = pageWidth / 2;
-        alignMode = "center";
-      } else if (docItem.alinhamento_conteudo === "right") {
-        lineX = rightX;
-        alignMode = "right";
-      } else if (docItem.alinhamento_conteudo === "justify") {
-        lineX = margin;
-        alignMode = "justify";
-      }
-
-      doc.text(line, lineX, y, { align: alignMode });
-      y += contentLineHeight;
+      y += 2;
     }
   }
 
